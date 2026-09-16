@@ -6,7 +6,6 @@
 
 [![Release](https://img.shields.io/github/v/release/fzc2000/bilibili-clean?style=flat-square&label=最新版本&color=brightgreen)](https://github.com/fzc2000/bilibili-clean/releases)
 [![Upstream](https://img.shields.io/badge/上游-BiliRoamingX%4058aaf27-blue?style=flat-square)](https://github.com/BiliRoamingX/BiliRoamingX/tree/58aaf27)
-[![Verify](https://img.shields.io/badge/真机验证-passed-success?style=flat-square)](./VERIFY_REPORT.md)
 [![License](https://img.shields.io/badge/License-GPL--3.0-orange?style=flat-square)](./LICENSE)
 
 > ✨  一个由  BiliRoamingX 二次开发的Bilibili官方客户端，含去广告解锁地区限制等功能
