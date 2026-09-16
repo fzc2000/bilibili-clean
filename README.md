@@ -7,6 +7,7 @@
 [![Release](https://img.shields.io/github/v/release/fzc2000/bilibili-clean?style=flat-square&label=最新版本&color=brightgreen)](https://github.com/fzc2000/bilibili-clean/releases)
 [![Upstream](https://img.shields.io/badge/上游-BiliRoamingX%4058aaf27-blue?style=flat-square)](https://github.com/BiliRoamingX/BiliRoamingX/tree/58aaf27)
 [![Verify](https://img.shields.io/badge/真机验证-passed-success?style=flat-square)](./VERIFY_REPORT.md)
+[![License](https://img.shields.io/badge/License-GPL--3.0-orange?style=flat-square)](./LICENSE)
 
 > ✨ 基于 BiliRoamingX 二次开发 — 去广告，以及从 Evolved 搬来的实用功能
 
@@ -113,6 +114,12 @@ GITHUB_ACTOR=你的用户名 GITHUB_TOKEN=你的令牌 ../build-and-patch.sh
 - [BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX) — 补丁框架和大部分去广告能力
 - [Bilibili-Evolved](https://github.com/the1812/Bilibili-Evolved) — 功能思路的来源
 - [ReVanced](https://github.com/ReVanced) — 打补丁的工具链
+
+## License
+
+本项目基于 [BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX)（GPL-3.0）二次开发，同样采用 **[GPL-3.0](./LICENSE)**。
+
+拿去改、拿去发都行，但改完也得开源，别闭源拿去卖。
 
 ---
 
