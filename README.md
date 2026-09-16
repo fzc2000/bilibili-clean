@@ -10,7 +10,7 @@
 
 > ✨ 基于 BiliRoamingX 二次开发 — 去广告，以及从 Evolved 搬来的实用功能
 
-📝 **[下载发布版本](https://github.com/fzc2000/bilibili-clean/releases)** | 📋 **[验证报告](./VERIFY_REPORT.md)** | 🔧 **[自己编译](#自己编)** | 🧩 **[上游 BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX)**
+📝 **[下载发布版本](https://github.com/fzc2000/bilibili-clean/releases)** | ❤️ **[赞助](./SPONSOR.md)** | 🧩 **[上游 BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX)**
 
 _我只是想安安静静看个视频._
 
