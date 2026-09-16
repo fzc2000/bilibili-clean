@@ -54,7 +54,7 @@ _我只是想安安静静看个视频._
 
 ## 快速开始
 
-前往 **[Release](../../releases)** 下载最新 APK 安装即可。
+前往 **[Release](../../releases)** 下载最新 APK 安装。
 
 > [!IMPORTANT]
 > 签名和官方不一样，**安装前需要先卸载官方版**。之后升级只认这里发的包，签名一致才能覆盖安装。
@@ -113,10 +113,10 @@ GITHUB_ACTOR=你的用户名 GITHUB_TOKEN=你的令牌 ../build-and-patch.sh
 
 ## License
 
-本项目基于 [BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX)（GPL-3.0）二次开发，同样采用 **[GPL-3.0](./LICENSE)**。
+本项目基于 [BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX)（GPL-3.0）二次开发， **[GPL-3.0](./LICENSE)**。
 
 ---
 
 <div align="center">
-<sub>自用项目，图个清净。B 站客户端的一切权利归 B 站。不分发官方 APK，不对使用后果负责。</sub>
+<sub>原神</sub>
 </div>
