@@ -2,9 +2,9 @@
 
 <img src="https://img.shields.io/badge/B%E7%AB%99-8.92.1-00A1D6?style=for-the-badge&logo=bilibili&logoColor=white" alt="Bilibili 8.92.1" />
 
-# bili-adfree-build
+# Bilibili Clean
 
-[![Release](https://img.shields.io/github/v/release/fzc2000/bili-adfree-build?style=flat-square&label=最新版本&color=brightgreen)](https://github.com/fzc2000/bili-adfree-build/releases)
+[![Release](https://img.shields.io/github/v/release/fzc2000/bilibili-clean?style=flat-square&label=最新版本&color=brightgreen)](https://github.com/fzc2000/bilibili-clean/releases)
 [![Upstream](https://img.shields.io/badge/上游-BiliRoamingX%4058aaf27-blue?style=flat-square)](https://github.com/BiliRoamingX/BiliRoamingX/tree/58aaf27)
 [![Verify](https://img.shields.io/badge/真机验证-passed-success?style=flat-square)](./VERIFY_REPORT.md)
 
@@ -12,7 +12,7 @@
 
 _我只是想安安静静看个视频._
 
-📦 **[下载 APK](https://github.com/fzc2000/bili-adfree-build/releases)** | 📋 **[验证报告](./VERIFY_REPORT.md)** | 🔧 **[自己编译](#自己编)**
+📦 **[下载 APK](https://github.com/fzc2000/bilibili-clean/releases)** | 📋 **[验证报告](./VERIFY_REPORT.md)** | 🔧 **[自己编译](#自己编)**
 
 </div>
 
