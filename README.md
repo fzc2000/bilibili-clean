@@ -49,7 +49,7 @@ _我只是想安安静静看个视频._
 
 ## 截图
 
-| 直播  | 去广告 | 工具：批量删除动态 |
+| 直播  | 去广告 |
 |:-:|:-:|:-:|
 | ![直播 tab](docs/screenshots/live_tab.png) | ![去广告](docs/screenshots/remove_ads.png) | 
 | 漫游设置：新加的「去广告」分类 |
