@@ -9,8 +9,8 @@
 [![Verify](https://img.shields.io/badge/真机验证-passed-success?style=flat-square)](./VERIFY_REPORT.md)
 [![License](https://img.shields.io/badge/License-GPL--3.0-orange?style=flat-square)](./LICENSE)
 
-> ✨ 基于 BiliRoamingX 二次开发 — 去广告，以及从 Evolved 搬来的实用功能
-
+> ✨  一个由  BiliRoamingX 二次开发的Bilibili官方客户端，含去广告解锁地区限制等功能
+> 
 📝 **[下载发布版本](https://github.com/fzc2000/bilibili-clean/releases)** | 🧩 **[BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX)**
 
 _我只是想安安静静看个视频._
