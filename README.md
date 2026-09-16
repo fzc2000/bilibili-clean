@@ -8,11 +8,9 @@
 [![Upstream](https://img.shields.io/badge/上游-BiliRoamingX%4058aaf27-blue?style=flat-square)](https://github.com/BiliRoamingX/BiliRoamingX/tree/58aaf27)
 [![Verify](https://img.shields.io/badge/真机验证-passed-success?style=flat-square)](./VERIFY_REPORT.md)
 
-> ✨ 基于 BiliRoamingX 的个人补丁包 — 去广告，加上从 Evolved 搬来的实用功能
+> ✨ 基于 BiliRoamingX 二次开发 — 去广告，以及从 Evolved 搬来的实用功能
 
 _我只是想安安静静看个视频._
-
-📦 **[下载 APK](https://github.com/fzc2000/bilibili-clean/releases)** | 📋 **[验证报告](./VERIFY_REPORT.md)** | 🔧 **[自己编译](#自己编)**
 
 </div>
 
@@ -20,9 +18,7 @@ _我只是想安安静静看个视频._
 
 ## 为什么做这个
 
-B 站移动端的广告越来越离谱——开屏 5 秒广告、信息流里塞推广、直播间一进去就自动播。[BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX) 解决了大部分，但我在网页端用 [Bilibili-Evolved](https://github.com/the1812/Bilibili-Evolved) 养成的习惯——记住合集进度、批量清动态——手机上没有。
-
-所以自己加了几个功能编了个包，既然都编了就放出来，万一有人也想要呢。
+因为我受不了开屏广告，虽然我知道这是B站的很大一部分收益来源。但是 和我又有什么关系呢？
 
 ## 特性
 
