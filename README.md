@@ -49,12 +49,10 @@ _我只是想安安静静看个视频._
 
 ## 截图
 
-| 直播  | 去广告 |
+| 直播 | 去广告 | 漫游设置 |
 |:-:|:-:|:-:|
-| ![直播 tab](docs/screenshots/live_tab.png) | ![去广告](docs/screenshots/remove_ads.png) | 
-| 漫游设置：新加的「去广告」分类 |
-|:-:|
-| ![漫游设置](docs/screenshots/roaming_home.png) |
+| ![直播 tab](docs/screenshots/live_tab.png) | ![去广告](docs/screenshots/remove_ads.png) | ![漫游设置](docs/screenshots/roaming_home.png) |
+| 顶部横幅老实待着 | 开关全收在一页 | 新加的「去广告」分类 |
 
 ## 快速开始
 
