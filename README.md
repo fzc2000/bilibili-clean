@@ -10,7 +10,7 @@
 
 > ✨ 基于 BiliRoamingX 二次开发 — 去广告，以及从 Evolved 搬来的实用功能
 
-📝 **[下载发布版本](https://github.com/fzc2000/bilibili-clean/releases)** | ❤️ **[赞助](./SPONSOR.md)** | 🧩 **[上游 BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX)**
+📝 **[下载发布版本](https://github.com/fzc2000/bilibili-clean/releases)** | ❤️ **[赞助](./SPONSOR.md)** | 🧩 **[BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX)**
 
 _我只是想安安静静看个视频._
 
@@ -20,7 +20,7 @@ _我只是想安安静静看个视频._
 
 ## 为什么做这个
 
-因为我受不了开屏广告，虽然我知道这是B站的很大一部分收益来源。但是 和我又有什么关系呢？
+因为我受不了开屏广告，虽然我知道这是B站的很大一部分收益来源。但 这和我又有什么关系呢？
 
 ## 特性
 
@@ -49,10 +49,9 @@ _我只是想安安静静看个视频._
 
 ## 截图
 
-| 直播 tab：顶部横幅老实待着 | 去广告：开关全在一页 | 工具：批量删除动态 |
+| 直播  | 去广告 | 工具：批量删除动态 |
 |:-:|:-:|:-:|
-| ![直播 tab](docs/screenshots/live_tab.png) | ![去广告](docs/screenshots/remove_ads.png) | ![工具](docs/screenshots/tools.png) |
-
+| ![直播 tab](docs/screenshots/live_tab.png) | ![去广告](docs/screenshots/remove_ads.png) | 
 | 漫游设置：新加的「去广告」分类 |
 |:-:|
 | ![漫游设置](docs/screenshots/roaming_home.png) |
