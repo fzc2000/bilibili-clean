@@ -1,0 +1,2559 @@
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/AutoLikePatch.java b/integrations/app/src/main/java/app/revanced/bilibili/patches/AutoLikePatch.java
+index 5370309..3fbd356 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/AutoLikePatch.java
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/AutoLikePatch.java
+@@ -23,6 +23,9 @@ public class AutoLikePatch {
+     private static final int likeId = Utils.getResId("frame_recommend", "id");
+     private static final int like2Id = Utils.getResId("frame1", "id");
+     private static final int uniteLikeId = Utils.getResId("frame_like", "id");
++    // 8.92.x king position component may use like_layout instead of frame_like
++    private static final int uniteLikeLayoutId = Utils.getResId("like_layout", "id");
++    private static final int maxUniteLikeAttempts = 6;
+ 
+     @Keep
+     public static void autoLike(Object viewHolder) {
+@@ -58,16 +61,30 @@ public class AutoLikePatch {
+         likedVideos.add(aid);
+         if (like != 0) return;
+         // delay 500 ms to make sure view standby
++        clickUniteLike(aid, 1);
++    }
++
++    private static void clickUniteLike(long aid, int attempt) {
+         Utils.async(500L, () -> {
++            // the page may have switched to another video meanwhile
++            if (detail == null || detail.first != aid) return;
+             // async search like button, to improve performance
+             Activity activity = ApplicationDelegate.getTopActivity();
+-            if (activity != null && !activity.isFinishing() && !activity.isDestroyed()) {
+-                View view = activity.findViewById(uniteLikeId);
+-                if (view != null) {
+-                    // switch to main thread to perform click
+-                    Utils.runOnMainThread(view::callOnClick);
+-                }
++            if (activity == null || activity.isFinishing() || activity.isDestroyed()) return;
++            View view = findUniteLikeView(activity);
++            if (view != null) {
++                // switch to main thread to perform click
++                Utils.runOnMainThread(view::callOnClick);
++            } else if (attempt < maxUniteLikeAttempts) {
++                clickUniteLike(aid, attempt + 1);
+             }
+         });
+     }
++
++    private static View findUniteLikeView(Activity activity) {
++        View view = uniteLikeId != 0 ? activity.findViewById(uniteLikeId) : null;
++        if (view == null && uniteLikeLayoutId != 0)
++            view = activity.findViewById(uniteLikeLayoutId);
++        return view != null && view.isShown() ? view : null;
++    }
+ }
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/BLRoutePatch.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/BLRoutePatch.kt
+index 0a98d2c..3ebb8af 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/BLRoutePatch.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/BLRoutePatch.kt
+@@ -19,6 +19,20 @@ object BLRoutePatch {
+         return VideoQualityPatch.halfScreenQuality() != 0 || VideoQualityPatch.getMatchedFullScreenQuality() != 0 || Settings.DefaultPlaybackSpeed() != 0f
+     }
+ 
++    @Keep
++    @JvmStatic
++    fun intercept(url: String?): String? {
++        if (url.isNullOrEmpty()) return url
++        return runCatching {
++            val uri = Uri.parse(url)
++            val newUri = intercept(uri)
++            if (newUri == null || newUri == uri) url else newUri.toString()
++        }.getOrElse {
++            Logger.error(it) { "BLRoutePatch.intercept(String) failed, url: $url" }
++            url
++        }
++    }
++
+     @Keep
+     @JvmStatic
+     fun intercept(uri: Uri?): Uri? {
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/CacheRedirectPatch.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/CacheRedirectPatch.kt
+index a90fdaf..94d0520 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/CacheRedirectPatch.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/CacheRedirectPatch.kt
+@@ -94,6 +94,24 @@ object CacheRedirectPatch {
+         return true
+     }
+ 
++    @Keep
++    @JvmStatic
++    fun onUniteDownloadMenuStaticClick(self: Any, originMethod: String): Boolean {
++        if (!Settings.ExternalDownloader()) return false
++        val packageName = Settings.ExternalDownloaderName()
++            .ifEmpty { return false }
++        val videoUrl = VideoInfoHolder.currentVideoUrl() ?: return false
++        val topActivity = ApplicationDelegate.getTopActivity() ?: return false
++        showConfirmDialog(topActivity, videoUrl, packageName) {
++            runCatching {
++                self.javaClass.declaredMethods.first {
++                    it.name == originMethod && it.parameterTypes.size == 1
++                }.apply { isAccessible = true }.invoke(null, self)
++            }.onFailure { Logger.error(it) { "CacheRedirectPatch, invoke origin download failed" } }
++        }
++        return true
++    }
++
+     private fun showConfirmDialog(
+         context: Context,
+         videoUrl: String,
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/CommentImagePatch.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/CommentImagePatch.kt
+index 376e9b7..a699697 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/CommentImagePatch.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/CommentImagePatch.kt
+@@ -1,5 +1,6 @@
+ package app.revanced.bilibili.patches
+ 
++import android.app.AlertDialog
+ import android.os.Parcelable
+ import android.view.HapticFeedbackConstants
+ import android.view.View
+@@ -10,19 +11,39 @@ import app.revanced.bilibili.utils.*
+ import com.bilibili.lib.imageviewer.fragment.ImageFragment
+ 
+ object CommentImagePatch {
++    // urls of the image set last opened from a comment, for "保存全部" (图片批量导出)
++    @Volatile
++    private var lastPictureUrls: List<String> = emptyList()
++
++    private fun Any.imageUrl(): String? {
++        val field = Reflex.findFirstFieldByExactTypeOrNull(
++            javaClass.superclass ?: javaClass, String::class.java
++        )?.name ?: return null
++        return getFieldAs<String?>(field).orEmpty().substringBefore('@')
++            .takeIf { it.startsWith("http") }
++    }
++
+     @Keep
+     @JvmStatic
+     fun bindClickListener(fragment: ImageFragment) {
+         if (!Settings.SaveCommentImage() && !Versions.ge7_76_0()) return
+         val imageItem = fragment.arguments?.parcelable<Parcelable>("image_item") ?: return
+-        val field = Reflex.findFirstFieldByExactTypeOrNull(
+-            imageItem.javaClass.superclass, String::class.java
+-        )?.name ?: return
+-        val imageUrl = imageItem.getFieldAs<String?>(field).orEmpty().substringBefore('@')
+-            .takeIf { it.startsWith("http") } ?: return
+-        fragment.view?.findView<View>("image_view")?.setOnLongClickListener {
+-            it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+-            saveImage(imageUrl)
++        val imageUrl = imageItem.imageUrl() ?: return
++        fragment.view?.findView<View>("image_view")?.setOnLongClickListener { view ->
++            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
++            val all = lastPictureUrls
++            if (all.size > 1 && all.contains(imageUrl)) {
++                val theme = Utils.getResId("AppTheme.Dialog.Alert", "style")
++                AlertDialog.Builder(view.context, theme)
++                    .setItems(arrayOf("保存此图", "保存全部（${all.size} 张）")) { _, which ->
++                        if (which == 0) saveImage(imageUrl)
++                        else all.forEach { saveImage(it) }
++                    }
++                    .setNegativeButton(android.R.string.cancel, null)
++                    .show()
++            } else {
++                saveImage(imageUrl)
++            }
+             true
+         }
+     }
+@@ -30,6 +51,7 @@ object CommentImagePatch {
+     @Keep
+     @JvmStatic
+     fun onCommentImageClick(pictures: List<*>, index: Int) {
++        lastPictureUrls = pictures.mapNotNull { it?.imageUrl() }
+         val imageViewerModelClass = runCatchingOrNull {
+             Class.forName("com.bilibili.lib.imageviewer.ImageViewerModel")
+         } ?: return
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/LiveRoomPatch.java b/integrations/app/src/main/java/app/revanced/bilibili/patches/LiveRoomPatch.java
+index 02b2424..7d6258a 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/LiveRoomPatch.java
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/LiveRoomPatch.java
+@@ -41,4 +41,8 @@ public class LiveRoomPatch {
+     public static boolean disableAutoFloat() {
+         return Settings.DisableAutoFloat.get();
+     }
++
++    public static boolean disableLiveHomeAutoPlay() {
++        return Settings.LiveHomePause.get();
++    }
+ }
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/SubtitleImportSavePatch.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/SubtitleImportSavePatch.kt
+index 335af3c..21e5c00 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/SubtitleImportSavePatch.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/SubtitleImportSavePatch.kt
+@@ -110,7 +110,7 @@ object SubtitleImportSavePatch {
+                 subtitle.addSubtitles(newSubtitle)
+                 interactLayerService.callMethod(setDmViewReplyMethod, newDmViewReply)
+                 interactLayerService.callMethod(loadSubtitleMethod, newSubtitle, null)
+-                interactLayerService.callMethod(recordSelectedSubtitleMethod, false)
++                interactLayerService.callRecordSelectedSubtitle()
+                 widgetService.callMethod(hideWidgetMethod, widget.getField(widgetTokenField))
+                 Utils.runOnMainThread(800L) {
+                     val gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+@@ -201,6 +201,16 @@ object SubtitleImportSavePatch {
+         }
+     }
+ 
++    /** Old versions take (Z), 8.92.x takes (ZZZ); pass false for every flag. */
++    private fun Any.callRecordSelectedSubtitle() {
++        val method = (javaClass.methods.asSequence() + javaClass.declaredMethods.asSequence()).firstOrNull { m ->
++            m.name == recordSelectedSubtitleMethod && m.parameterTypes.isNotEmpty()
++                    && m.parameterTypes.all { it == java.lang.Boolean.TYPE }
++        } ?: return
++        method.isAccessible = true
++        method.invoke(this, *Array<Any?>(method.parameterTypes.size) { false })
++    }
++
+     object HookInfo {
+         @Keep
+         @JvmStatic
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/main/ApplicationDelegate.java b/integrations/app/src/main/java/app/revanced/bilibili/patches/main/ApplicationDelegate.java
+index 49d02aa..a68c6d6 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/main/ApplicationDelegate.java
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/main/ApplicationDelegate.java
+@@ -53,6 +53,8 @@ import java.util.Objects;
+ import app.revanced.bilibili.account.PassportChangeReceiver;
+ import app.revanced.bilibili.patches.CustomThemePatch;
+ import app.revanced.bilibili.patches.DpiPatch;
++import app.revanced.bilibili.patches.FontPatch;
++import app.revanced.bilibili.patches.NightSchedulePatch;
+ import app.revanced.bilibili.patches.okhttp.BangumiSeasonHook;
+ import app.revanced.bilibili.settings.Settings;
+ import app.revanced.bilibili.utils.CrossProcessPreferences;
+@@ -95,6 +97,7 @@ public abstract class ApplicationDelegate extends Application {
+     public void onCreate() {
+         super.onCreate();
+         long start = System.currentTimeMillis();
++        FontPatch.apply();
+         registerActivityLifecycleCallbacks(new ActivityLifecycleCallback());
+         registerComponentCallbacks(new ComponentCallbacks());
+         updateBitmapDefaultDensity();
+@@ -110,6 +113,10 @@ public abstract class ApplicationDelegate extends Application {
+             Utils.async(500L, BangumiSeasonHook::injectExtraSearchTypes);
+             Utils.async(500L, BangumiSeasonHook::injectExtraSearchTypesV2);
+             Utils.async(2000L, CouponAutoReceiver::check);
++            NightSchedulePatch.check(this, true);
++            // 8.92.1 parses brand splash with Gson, drop any config cached before the http hook applied
++            if (Settings.PurifySplash.get())
++                Utils.async(KtUtils::clearSplashConfigCache);
+         }
+         long end = System.currentTimeMillis();
+         Logger.debug(() -> String.format("Initializing BiliRoamingX on process %s cost %s ms", Utils.currentProcessName(), end - start));
+@@ -444,6 +451,7 @@ public abstract class ApplicationDelegate extends Application {
+         @Override
+         public void onActivityResumed(@NonNull Activity activity) {
+             printLifecycle(activity, "onActivityResumed", false);
++            NightSchedulePatch.check(activity, false);
+             if (activity instanceof MainActivityV2)
+                 VideoInfoHolder.clearCache();
+             else if (activity instanceof MediaViewerActivity) {
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/OkHttpPatch.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/OkHttpPatch.kt
+index 7422574..94bb226 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/OkHttpPatch.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/OkHttpPatch.kt
+@@ -23,6 +23,7 @@ object OkHttpPatch {
+         DmQoeShow,
+         Eps,
+         FeedIndex,
++        Followings,
+         GarbSuitDetail,
+         GrpcPlayViewUnite,
+         GrpcUnlockAreaLimitForPlay,
+@@ -36,6 +37,7 @@ object OkHttpPatch {
+         SearchRecommend,
+         SearchSquare,
+         Season,
++        Splash,
+         SeasonRecommend,
+         ShareChannels,
+         ShareClick,
+@@ -113,11 +115,14 @@ object OkHttpPatch {
+                 "br" -> BrotliInputStream(reqStream)
+                 else -> reqStream
+             }).bufferedReader().use { it.readText() }
+-            val response = (when (respEncoding) {
+-                "gzip" -> GZIPInputStream(respStream)
+-                "deflate" -> InflaterInputStream(respStream)
+-                "br" -> BrotliInputStream(respStream)
+-                else -> respStream
++            val respBuffered = respStream.buffered()
++            // Empty body with a content-encoding header (e.g. HEAD / 200 without content)
++            val respEmpty = respBuffered.run { mark(1); val b = read(); reset(); b == -1 }
++            val response = if (respEmpty) "" else (when (respEncoding) {
++                "gzip" -> GZIPInputStream(respBuffered)
++                "deflate" -> InflaterInputStream(respBuffered)
++                "br" -> BrotliInputStream(respBuffered)
++                else -> respBuffered
+             }).bufferedReader().use { it.readText() }
+             Logger.debug { "OkHttpPatch.hook, code: $code, url: ${url.safeContent}" }
+             Logger.debug { "OkHttpPatch.hook, request, encoding: $reqEncoding, content: ${request.safeContent}" }
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/hooks/HistoryReport.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/hooks/HistoryReport.kt
+index 101596f..68d7cd3 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/hooks/HistoryReport.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/hooks/HistoryReport.kt
+@@ -1,24 +1,69 @@
+ package app.revanced.bilibili.patches.okhttp.hooks
+ 
++import app.revanced.bilibili.account.Accounts
++import app.revanced.bilibili.http.HttpClient
++import app.revanced.bilibili.http.RequestBody
++import app.revanced.bilibili.patches.main.VideoInfoHolder
+ import app.revanced.bilibili.patches.okhttp.ApiHook
+ import app.revanced.bilibili.settings.Settings
++import app.revanced.bilibili.utils.Logger
++import app.revanced.bilibili.utils.Toasts
++import app.revanced.bilibili.utils.Utils
+ import app.revanced.bilibili.utils.decodeFormBody
+ import app.revanced.bilibili.utils.maybeThailand
+ import app.revanced.bilibili.utils.saveVideoHistory
++import com.bapis.bilibili.app.viewunite.v1.ViewReply
+ 
+ object HistoryReport : ApiHook() {
++    // aids already removed from watch later in this process, avoid repeated requests
++    private val removedFromWatchLater = HashSet<Long>()
++
+     override fun shouldHook(url: String, status: Int): Boolean {
+-        return status.isOk && Settings.SaveThailandHistory()
++        return status.isOk && (Settings.SaveThailandHistory() || Settings.AutoRemoveWatchLater())
+                 && url.contains("/x/v2/history/report")
+     }
+ 
+     override fun hook(url: String, status: Int, request: String, response: String): String {
+         val form = decodeFormBody(request)
+-        val sid = form["sid"] ?: return response
+-        val epId = form["epid"] ?: return response
+-        val progress = form["progress"] ?: return response
+-        if (maybeThailand(sid, epId))
+-            saveVideoHistory(sid.toInt(), epId.toInt(), progress.toLong())
++        if (Settings.SaveThailandHistory()) {
++            val sid = form["sid"]
++            val epId = form["epid"]
++            val progress = form["progress"]
++            if (sid != null && epId != null && progress != null && maybeThailand(sid, epId))
++                saveVideoHistory(sid.toInt(), epId.toInt(), progress.toLong())
++        }
++        if (Settings.AutoRemoveWatchLater())
++            autoRemoveWatchLater(form)
+         return response
+     }
++
++    /**
++     * Bilibili-Evolved "自动移出稍后再看": once a video is (almost) finished, remove it from
++     * the watch later list. Unknown aids are ignored by the server.
++     */
++    private fun autoRemoveWatchLater(form: Map<String, String>) {
++        val aid = form["aid"]?.toLongOrNull() ?: return
++        val progress = form["progress"]?.toLongOrNull() ?: return
++        val view = VideoInfoHolder.current?.view as? ViewReply ?: return
++        if (!view.hasArc() || view.arc.aid != aid) return
++        val duration = view.arc.duration
++        // progress -1 means the video was played to the end
++        val finished = progress == -1L || (duration > 0 && progress >= duration - 15)
++        if (!finished) return
++        if (!Accounts.isLogin || Accounts.cookieBiliJct.isEmpty()) return
++        synchronized(removedFromWatchLater) {
++            if (!removedFromWatchLater.add(aid)) return
++        }
++        Utils.async {
++            val json = HttpClient.post(
++                "https://api.bilibili.com/x/v2/history/toview/del",
++                headers = mapOf("Cookie" to "SESSDATA=${Accounts.cookieSESSDATA}"),
++                referer = "https://www.bilibili.com/",
++                body = RequestBody.form("aid" to aid, "csrf" to Accounts.cookieBiliJct),
++            )?.json()
++            Logger.debug { "HistoryReport.autoRemoveWatchLater, aid: $aid, response: $json" }
++            if (json?.optInt("code", -1) == 0)
++                Toasts.showShort("已自动移出稍后再看")
++        }
++    }
+ }
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/hooks/Season.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/hooks/Season.kt
+index d11b08c..d8a780a 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/hooks/Season.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/hooks/Season.kt
+@@ -4,6 +4,8 @@ import app.revanced.bilibili.meta.VideoInfo
+ import app.revanced.bilibili.patches.main.VideoInfoHolder
+ import app.revanced.bilibili.patches.okhttp.ApiHook
+ import app.revanced.bilibili.patches.okhttp.BangumiSeasonHook
++import app.revanced.bilibili.settings.Settings
++import app.revanced.bilibili.utils.toJSONObject
+ 
+ object Season : ApiHook() {
+     override fun shouldHook(url: String, status: Int): Boolean {
+@@ -13,7 +15,18 @@ object Season : ApiHook() {
+     }
+ 
+     override fun hook(url: String, status: Int, request: String, response: String): String {
+-        val newResponse = BangumiSeasonHook.unlockBangumi(url, response)
++        var newResponse = BangumiSeasonHook.unlockBangumi(url, response)
++        val hideRating = Settings.HideBangumiRating()
++        val hideSponsor = Settings.HideBangumiSponsor()
++        if (hideRating || hideSponsor) newResponse = runCatching {
++            val json = newResponse.toJSONObject()
++            val result = json.optJSONObject("result") ?: json.optJSONObject("data")
++            if (result == null) newResponse else {
++                if (hideRating) result.remove("rating")
++                if (hideSponsor) result.remove("sponsor")
++                json.toString()
++            }
++        }.getOrDefault(newResponse)
+         VideoInfoHolder.updateCurrent { videoInfo ->
+             videoInfo?.apply { view = newResponse } ?: VideoInfo(0, newResponse)
+         }
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/ViewUniteReplyHook.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/ViewUniteReplyHook.kt
+index 18d88c9..bdecf31 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/ViewUniteReplyHook.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/ViewUniteReplyHook.kt
+@@ -46,6 +46,8 @@ object ViewUniteReplyHook {
+             hookTabModules(viewReply)
+             hookSupplement(viewReply)
+             hookViewConfig(viewReply.viewBase.config)
++            if (Settings.HideAvatarPendant() && viewReply.hasOwner())
++                viewReply.owner.avatar.removePendantLayers()
+         }
+         if (Settings.UnlockAreaLimit()
+             && (viewReply == null || viewReply == ViewReply.getDefaultInstance())
+@@ -93,6 +95,9 @@ object ViewUniteReplyHook {
+                         clearFollowGuide()
+                 }
+             }
++            // "跳过充电鸣谢": the end-of-video charging list is driven by elecRank
++            if (Settings.SkipChargeThanks() && viewUgcAny.hasElecRank())
++                viewUgcAny.clearElecRank()
+             viewReply.supplement = newAny(VIEW_UGC_ANY_TYPE_URL, viewUgcAny)
+             return
+         }
+@@ -146,6 +151,20 @@ object ViewUniteReplyHook {
+                     } else if (module.hasLiveOrder()) {
+                         if (Settings.BlockLiveOrder())
+                             toRemoveIndexes.add(index)
++                    } else if (module.hasSponsor()) {
++                        if (Settings.HideBangumiSponsor())
++                            toRemoveIndexes.add(index)
++                    } else if (module.hasOgvIntroduction()) {
++                        if (Settings.HideBangumiRating())
++                            module.ogvIntroduction.clearScore()
++                    } else if (module.hasKingPosition()) {
++                        if (Settings.HideVideoShare()) {
++                            val kingPosition = module.kingPosition
++                            kingPosition.kingPosList.withIndex()
++                                .filter { (_, pos) -> pos.type == KingPositionType.SHARE }
++                                .map { it.index }.asReversed()
++                                .forEach { kingPosition.removeKingPos(it) }
++                        }
+                     }
+                 }
+                 toRemoveIndexes.asReversed().forEach {
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DmSegMobile.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DmSegMobile.kt
+index 752a62e..652834b 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DmSegMobile.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DmSegMobile.kt
+@@ -48,6 +48,64 @@ object DmSegMobile : MossHook<DmSegMobileReq, DmSegMobileReply>() {
+                 }
+             }
+         }
++        if (reply != null) {
++            if (Settings.DmUnescape())
++                reply.elemsList.forEach { it.content = it.content.unescapeHtml() }
++            if (Settings.DmMerge())
++                mergeDanmaku(reply, Settings.DmMergeInterval())
++        }
+         return super.hookAfter(req, reply, error)
+     }
++
++    private val htmlEntityRegex by lazy { Regex("""&(#\d+|#x[0-9a-fA-F]+|amp|lt|gt|quot|apos|nbsp);""") }
++
++    private fun String.unescapeHtml(): String {
++        if (indexOf('&') == -1) return this
++        return htmlEntityRegex.replace(this) { m ->
++            when (val entity = m.groupValues[1]) {
++                "amp" -> "&"
++                "lt" -> "<"
++                "gt" -> ">"
++                "quot" -> "\""
++                "apos" -> "'"
++                "nbsp" -> " "
++                else -> runCatching {
++                    val code = if (entity.startsWith("#x")) entity.substring(2).toInt(16)
++                    else entity.substring(1).toInt()
++                    String(Character.toChars(code))
++                }.getOrDefault(m.value)
++            }
++        }
++    }
++
++    /**
++     * Merge danmaku with identical content that appear within [intervalSec] seconds
++     * into a single "content ×N" entry. Advanced (7), code (8) and BAS (9) danmaku are left alone.
++     */
++    private fun mergeDanmaku(reply: DmSegMobileReply, intervalSec: Int) {
++        val elems = reply.elemsList
++        if (elems.size < 2) return
++        val window = intervalSec.coerceAtLeast(1) * 1000
++        val order = elems.indices.sortedBy { elems[it].progress }
++        val anchors = HashMap<String, Int>()
++        val counts = HashMap<Int, Int>()
++        val toRemove = ArrayList<Int>()
++        for (i in order) {
++            val elem = elems[i]
++            if (elem.mode >= 7) continue
++            val key = elem.content.trim()
++            if (key.isEmpty()) continue
++            val anchor = anchors[key]
++            if (anchor != null && elem.progress - elems[anchor].progress <= window) {
++                counts[anchor] = (counts[anchor] ?: 1) + 1
++                toRemove.add(i)
++            } else {
++                anchors[key] = i
++            }
++        }
++        if (toRemove.isEmpty()) return
++        counts.forEach { (idx, n) -> elems[idx].content = "${elems[idx].content} ×$n" }
++        toRemove.sortDescending()
++        toRemove.forEach { reply.removeElems(it) }
++    }
+ }
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynAll.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynAll.kt
+index 0a76f46..4b40dc6 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynAll.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynAll.kt
+@@ -22,6 +22,7 @@ object DynAll : DynListBase<DynAllReq, DynAllReply>() {
+             reply?.clearUpList()
+         reply?.dynamicList?.run {
+             listList.getToRemoveIdxList().asReversed().forEach { removeList(it) }
++            purify(req.playerArgs, req.localTime)
+         }
+         return super.hookAfter(req, reply, error)
+     }
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynListBase.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynListBase.kt
+index f797dd0..271a67d 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynListBase.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynListBase.kt
+@@ -3,7 +3,12 @@ package app.revanced.bilibili.patches.protobuf.hooks
+ import app.revanced.bilibili.patches.protobuf.MossHook
+ import app.revanced.bilibili.settings.Settings
+ import app.revanced.bilibili.utils.ArrayUtils
++import app.revanced.bilibili.utils.FollowGroups
++import app.revanced.bilibili.utils.Logger
++import app.revanced.bilibili.utils.Utils
++import app.revanced.bilibili.utils.removePendantLayers
+ import com.bapis.bilibili.ad.v1.SourceContentDto
++import com.bapis.bilibili.app.archive.middleware.v1.PlayerArgs
+ import com.bapis.bilibili.app.dynamic.v2.*
+ import com.google.protobuf.GeneratedMessageLite
+ 
+@@ -32,6 +37,8 @@ abstract class DynListBase<out Req : GeneratedMessageLite<*, *>, out Resp : Gene
+         val rmUpReservation = Settings.DynRmUpReservation()
+         val rmCm = Settings.DynRmCm()
+         val rmStory = Settings.DynRmStory()
++        val rmOnlyFansAll = Settings.DynRmOnlyFansAll()
++        val followGroupMids = if (Settings.DynFollowGroupFilter()) FollowGroups.cachedMids() else emptySet()
+         val typeArray = ArrayUtils.toIntArray(typeSet)
+         val uidArray = ArrayUtils.toLongArray(uidSet)
+         val idxList = mutableListOf<Int>()
+@@ -48,6 +55,17 @@ abstract class DynListBase<out Req : GeneratedMessageLite<*, *>, out Resp : Gene
+                 idxList.add(idx)
+                 continue
+             }
++            if (rmOnlyFansAll && extend.hasOnlyFansProperty()
++                && extend.onlyFansProperty.isOnlyFans
++            ) {
++                idxList.add(idx)
++                continue
++            }
++            // "按关注分组筛选动态": keep only authors in the selected follow groups
++            if (followGroupMids.isNotEmpty() && extend.uid > 0 && !followGroupMids.contains(extend.uid)) {
++                idxList.add(idx)
++                continue
++            }
+             if (rmAdLink && (extend.origDescList.any { it.type == DescType.desc_type_goods }
+                         || extend.descList.any { it.type == DescType.desc_type_goods })) {
+                 idxList.add(idx)
+@@ -122,6 +140,81 @@ abstract class DynListBase<out Req : GeneratedMessageLite<*, *>, out Resp : Gene
+         return idxList
+     }
+ 
++    /**
++     * Post-process dynamic items that survived filtering: unfold, strip comment previews, hide pendants.
++     */
++    protected fun DynamicList.purify(playerArgs: PlayerArgs?, localTime: Int) =
++        purifyDynamicItems(listList, ::removeList, ::addList, playerArgs, localTime)
++
++    protected fun CardVideoDynList.purify(playerArgs: PlayerArgs?, localTime: Int) =
++        purifyDynamicItems(listList, ::removeList, ::addList, playerArgs, localTime)
++
++    private fun purifyDynamicItems(
++        items: List<DynamicItem>,
++        remove: (Int) -> Unit,
++        insert: (Int, DynamicItem) -> Unit,
++        playerArgs: PlayerArgs?,
++        localTime: Int,
++    ) {
++        val rmCommentPreview = Settings.DynRmCommentPreview()
++        val unfold = Settings.DynUnfold()
++        val hidePendant = Settings.HideAvatarPendant()
++        if (!rmCommentPreview && !unfold && !hidePendant) return
++        if (unfold) unfoldItems(items, remove, insert, playerArgs, localTime)
++        items.forEach { item ->
++            if (rmCommentPreview) {
++                item.modulesList.withIndex()
++                    .filter { (_, m) -> m.hasModuleComment() || m.hasModuleInteraction() }
++                    .map { it.index }.asReversed().forEach { item.removeModules(it) }
++            }
++            if (hidePendant) item.withForward().forEach { i ->
++                i.modulesList.forEach { m ->
++                    if (m.hasModuleAuthor()) m.moduleAuthor.author.run {
++                        clearPendant()
++                        avatar.removePendantLayers()
++                    }
++                }
++            }
++        }
++    }
++
++    /**
++     * Replace "N 条动态被折叠" placeholders with the real items via DynDetails.
++     * Skipped on the main thread, network is not allowed there.
++     */
++    private fun unfoldItems(
++        items: List<DynamicItem>,
++        remove: (Int) -> Unit,
++        insert: (Int, DynamicItem) -> Unit,
++        playerArgs: PlayerArgs?,
++        localTime: Int,
++    ) {
++        if (Utils.isCurrentlyOnMainThread()) return
++        val foldIndexes = items.withIndex().filter { (_, item) ->
++            item.modulesList.any { it.hasModuleFold() }
++        }.map { it.index }
++        for (idx in foldIndexes.asReversed()) {
++            val item = items[idx]
++            val ids = item.modulesList.first { it.hasModuleFold() }.moduleFold.foldIds
++            if (ids.isBlank()) continue
++            val details = runCatching {
++                DynamicMoss().dynDetails(DynDetailsReq().apply {
++                    dynamicIds = ids
++                    if (playerArgs != null) this.playerArgs = playerArgs
++                    this.localTime = localTime
++                })
++            }.onFailure {
++                Logger.error(it) { "DynListBase.unfold failed, ids: $ids" }
++            }.getOrNull() ?: continue
++            if (details.listCount == 0) continue
++            remove(idx)
++            details.listList.forEachIndexed { i, d ->
++                d.clearHasFold()
++                insert(idx + i, d)
++            }
++        }
++    }
++
+     private fun DynamicItem.withForward(): Array<DynamicItem> {
+         val forwardItem = modulesList.find { it.hasModuleDynamic() }?.moduleDynamic
+             ?.takeIf { it.hasDynForward() }?.dynForward?.item
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynVideo.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynVideo.kt
+index a3895a2..b552bbc 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynVideo.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynVideo.kt
+@@ -22,6 +22,7 @@ object DynVideo : DynListBase<DynVideoReq, DynVideoReply>() {
+             reply?.dynamicList?.run {
+                 listList.getToRemoveIdxList().asReversed().forEach { removeList(it) }
+             }
++        reply?.dynamicList?.purify(req.playerArgs, req.localTime)
+         return super.hookAfter(req, reply, error)
+     }
+ }
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/PlayURLPlayViewUnite.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/PlayURLPlayViewUnite.kt
+index 63c7b32..1acfae5 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/PlayURLPlayViewUnite.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/PlayURLPlayViewUnite.kt
+@@ -6,10 +6,18 @@ import app.revanced.bilibili.patches.protobuf.BangumiPlayUrlHook
+ import app.revanced.bilibili.patches.protobuf.MossHook
+ import com.bapis.bilibili.app.playerunite.v1.PlayViewUniteReply
+ import com.bapis.bilibili.app.playerunite.v1.PlayViewUniteReq
++import com.bapis.bilibili.playershared.VodInfo
+ import com.bilibili.lib.moss.api.MossException
+ import com.google.protobuf.GeneratedMessageLite
+ 
+ object PlayURLPlayViewUnite : MossHook<PlayViewUniteReq, PlayViewUniteReply>() {
++    // cid -> vod info of the last play url reply, used by the video tools panel
++    @Volatile
++    private var lastVodInfo: Pair<Long, VodInfo>? = null
++
++    @JvmStatic
++    fun vodInfoOf(cid: Long): VodInfo? = lastVodInfo?.takeIf { it.first == cid }?.second
++
+     override fun shouldHook(req: GeneratedMessageLite<*, *>): Boolean {
+         return req is PlayViewUniteReq
+     }
+@@ -30,6 +38,8 @@ object PlayURLPlayViewUnite : MossHook<PlayViewUniteReq, PlayViewUniteReply>() {
+             VideoInfoHolder.updateCurrent { videoInfo ->
+                 videoInfo?.apply { this.cid = cid } ?: VideoInfo(cid, null)
+             }
++            if (newReply.hasVodInfo())
++                lastVodInfo = cid to newReply.vodInfo
+         }
+         return newReply
+     }
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyDetailList.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyDetailList.kt
+index a7b6dde..1ace6fb 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyDetailList.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyDetailList.kt
+@@ -19,8 +19,10 @@ object ReplyDetailList : ReplyListBase<DetailListReq, DetailListReply>() {
+         reply: DetailListReply?,
+         error: MossException?
+     ): DetailListReply? {
+-        if (reply != null)
++        if (reply != null) {
+             filterReply(reply)
++            reply.root.purify()
++        }
+         if (reply != null && !Utils.isHd() && Settings.UnlockGif())
+             reply.root.unlockGif(scale = false)
+         return super.hookAfter(req, reply, error)
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyListBase.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyListBase.kt
+index 54d5474..af806c9 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyListBase.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyListBase.kt
+@@ -80,6 +80,86 @@ abstract class ReplyListBase<out Req : GeneratedMessageLite<*, *>, out Resp : Ge
+         return false
+     }
+ 
++    private var cachedRulesText = ""
++    private var cachedRules = emptyList<Pair<Regex, String>>()
++
++    /** "正则=>替换文本" per line, invalid lines are ignored. */
++    private fun replaceRules(): List<Pair<Regex, String>> {
++        val text = Settings.CommentReplaceRules()
++        if (text == cachedRulesText) return cachedRules
++        cachedRulesText = text
++        return text.lineSequence().mapNotNull { line ->
++            val sep = line.indexOf("=>")
++            if (sep <= 0) return@mapNotNull null
++            val pattern = line.substring(0, sep)
++            val replacement = line.substring(sep + 2)
++            runCatching { pattern.toRegex() to replacement }.getOrNull()
++        }.toList().also { cachedRules = it }
++    }
++
++    /**
++     * Simplify (strip decorations) and rewrite the content of a reply and its sub replies.
++     */
++    protected fun ReplyInfo.purify() {
++        val location = Settings.SimplifyCommentLocation()
++        val medal = Settings.SimplifyCommentMedal()
++        val garb = Settings.SimplifyCommentGarb()
++        val vip = Settings.SimplifyCommentVip()
++        val labels = Settings.SimplifyCommentLabels()
++        val pendant = Settings.HideAvatarPendant()
++        val rules = replaceRules()
++        if (!location && !medal && !garb && !vip && !labels && !pendant && rules.isEmpty())
++            return
++        purify(location, medal, garb, vip, labels, pendant, rules)
++    }
++
++    private fun ReplyInfo.purify(
++        location: Boolean,
++        medal: Boolean,
++        garb: Boolean,
++        vip: Boolean,
++        labels: Boolean,
++        pendant: Boolean,
++        rules: List<Pair<Regex, String>>,
++    ) {
++        if (location) replyControl.clearLocation()
++        if (medal) member.run {
++            clearFansMedalName()
++            clearFansGuardIcon()
++            clearFansHonorIcon()
++        }
++        if (garb) member.run {
++            clearGarbCardImage()
++            clearGarbCardImageWithFocus()
++            clearGarbCardJumpUrl()
++            clearGarbCardNumber()
++            clearGarbCardFanColor()
++        }
++        if (vip) member.run {
++            clearVipLabelText()
++            clearVipLabelPath()
++            clearVipLabelTheme()
++            clearVipNicknameColor()
++        }
++        if (labels) replyControl.run {
++            clearCardLabels()
++            clearLabelText()
++        }
++        if (pendant) member.clearGarbPendantImage()
++        if (rules.isNotEmpty()) {
++            val message = content.message
++            var newMessage = message
++            for ((regex, replacement) in rules)
++                newMessage = newMessage.replace(regex, replacement)
++            if (newMessage != message) {
++                content.message = newMessage
++                // rich text carries its own copy of the message, drop it so the app falls back
++                if (content.hasRichText()) content.clearRichText()
++            }
++        }
++        repliesList.forEach { it.purify(location, medal, garb, vip, labels, pendant, rules) }
++    }
++
+     protected fun ReplyInfo.unlockGif(scale: Boolean = true) {
+         content.apply {
+             pictureScale = if (scale) 1.5 else 1.0
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyMainList.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyMainList.kt
+index 2052187..eb5fefa 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyMainList.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyMainList.kt
+@@ -53,9 +53,21 @@ object ReplyMainList : ReplyListBase<MainListReq, MainListReply>() {
+             filterReplies(reply)
+         if (reply != null && !Utils.isHd() && Settings.UnlockGif())
+             unlockGif(reply)
++        if (reply != null)
++            purifyReplies(reply)
++        if (reply != null && Settings.HideNote())
++            reply.subjectControl.hasNoteAccess = false
+         return super.hookAfter(req, reply, error)
+     }
+ 
++    private fun purifyReplies(reply: MainListReply) {
++        reply.upTop.purify()
++        reply.adminTop.purify()
++        reply.voteTop.purify()
++        reply.topRepliesList.forEach { it.purify() }
++        reply.repliesList.forEach { it.purify() }
++    }
++
+     private fun unlockGif(reply: MainListReply) {
+         reply.upTop.unlockGif()
+         reply.adminTop.unlockGif()
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/SearchAll.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/SearchAll.kt
+index 49f3624..1f7327e 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/SearchAll.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/SearchAll.kt
+@@ -1,9 +1,14 @@
+ package app.revanced.bilibili.patches.protobuf.hooks
+ 
++import android.net.Uri
++import app.revanced.bilibili.meta.HookFlags
++import app.revanced.bilibili.patches.main.ApplicationDelegate
+ import app.revanced.bilibili.patches.okhttp.BangumiSeasonHook
+ import app.revanced.bilibili.patches.protobuf.MossHook
+ import app.revanced.bilibili.settings.Settings
+ import app.revanced.bilibili.utils.ArrayUtils
++import app.revanced.bilibili.utils.Logger
++import app.revanced.bilibili.utils.Utils
+ import com.bapis.bilibili.polymer.app.search.v1.SearchAllRequest
+ import com.bapis.bilibili.polymer.app.search.v1.SearchAllResponse
+ import com.bilibili.lib.moss.api.MossException
+@@ -39,6 +44,42 @@ object SearchAll : MossHook<SearchAllRequest, SearchAllResponse>() {
+         return req is SearchAllRequest
+     }
+ 
++    private class JumpRule(pattern: String, val template: String, val numberOnly: Boolean = false) {
++        val regex = Regex(pattern, RegexOption.IGNORE_CASE)
++    }
++
++    private val jumpRules = listOf(
++        JumpRule("""av(\d+)""", "bilibili://video/%s"),
++        JumpRule("""(BV[0-9A-Za-z]{10})""", "bilibili://video/%s"),
++        JumpRule("""ss(\d+)""", "bilibili://pgc/season/%s"),
++        JumpRule("""ep(\d+)""", "bilibili://pgc/season/ep/%s"),
++        JumpRule("""cv(\d+)""", "bilibili://article/%s"),
++        JumpRule("""(?:uid|space)[:：]?(\d+)""", "bilibili://space/%s"),
++        JumpRule("""(\d{1,12})""", "bilibili://video/%s", numberOnly = true),
++    )
++
++    /**
++     * Search bar jump: open the matching page directly instead of searching for
++     * av/BV/ss/ep/cv/uid identifiers.
++     */
++    override fun hookBefore(req: SearchAllRequest): Any? {
++        if (!Settings.SearchJump()) return null
++        if (req.pagination.next.isNotEmpty()) return null
++        val keyword = req.keyword.trim()
++        if (keyword.isEmpty()) return null
++        val numberJump = Settings.SearchJumpNumber()
++        val url = jumpRules.firstNotNullOfOrNull { rule ->
++            if (rule.numberOnly && !numberJump) null
++            else rule.regex.matchEntire(keyword)?.groupValues?.get(1)?.let { rule.template.format(it) }
++        } ?: return null
++        Logger.debug { "SearchAll.jump, keyword: $keyword, url: $url" }
++        Utils.runOnMainThread {
++            val activity = ApplicationDelegate.getTopActivity() ?: return@runOnMainThread
++            Utils.routeTo(Uri.parse(url), activity)
++        }
++        return HookFlags.STOP_EXECUTION
++    }
++
+     override fun hookAfter(
+         req: SearchAllRequest,
+         reply: SearchAllResponse?,
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ViewContinuousPlay.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ViewContinuousPlay.kt
+index fee88d6..06ca1b4 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ViewContinuousPlay.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ViewContinuousPlay.kt
+@@ -1,9 +1,11 @@
+ package app.revanced.bilibili.patches.protobuf.hooks
+ 
++import app.revanced.bilibili.patches.main.VideoInfoHolder
+ import app.revanced.bilibili.patches.protobuf.MossHook
+ import app.revanced.bilibili.settings.Settings
+ import com.bapis.bilibili.app.view.v1.ContinuousPlayReply
+ import com.bapis.bilibili.app.view.v1.ContinuousPlayReq
++import com.bapis.bilibili.app.viewunite.v1.ViewReply
+ import com.bilibili.lib.moss.api.MossException
+ import com.google.protobuf.GeneratedMessageLite
+ 
+@@ -19,6 +21,23 @@ object ViewContinuousPlay : MossHook<ContinuousPlayReq, ContinuousPlayReply>() {
+     ): ContinuousPlayReply? {
+         if (reply != null && Settings.DisableAutoNextPlay())
+             reply.clearRelates()
++        else if (reply != null)
++            customizeAutoPlay(reply)
+         return super.hookAfter(req, reply, error)
+     }
++
++    /**
++     * Bilibili-Evolved "定制自动连播": only continue with plain videos and/or videos of the same UP.
++     */
++    private fun customizeAutoPlay(reply: ContinuousPlayReply) {
++        val sameUp = Settings.AutoPlaySameUp()
++        val avOnly = Settings.AutoPlayAvOnly()
++        if (!sameUp && !avOnly) return
++        val ownerMid = (VideoInfoHolder.current?.view as? ViewReply)
++            ?.takeIf { it.hasOwner() }?.owner?.mid ?: 0L
++        reply.relatesList.withIndex().filter { (_, relate) ->
++            (avOnly && relate.getGoto() != "av")
++                    || (sameUp && ownerMid != 0L && relate.author.mid != ownerMid)
++        }.map { it.index }.asReversed().forEach { reply.removeRelates(it) }
++    }
+ }
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ViewUnite.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ViewUnite.kt
+index c28753b..b0dfd43 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ViewUnite.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ViewUnite.kt
+@@ -1,6 +1,8 @@
+ package app.revanced.bilibili.patches.protobuf.hooks
+ 
+ import app.revanced.bilibili.meta.VideoInfo
++import app.revanced.bilibili.patches.SeasonProgressPatch
++import app.revanced.bilibili.patches.VideoToolsPatch
+ import app.revanced.bilibili.patches.main.VideoInfoHolder
+ import app.revanced.bilibili.patches.protobuf.MossHook
+ import app.revanced.bilibili.patches.protobuf.ViewUniteReplyHook
+@@ -21,6 +23,8 @@ object ViewUnite : MossHook<ViewReq, ViewReply>() {
+             VideoInfoHolder.updateCurrent { videoInfo ->
+                 videoInfo?.apply { view = newReply } ?: VideoInfo(0, newReply)
+             }
++            VideoToolsPatch.onVideoLoaded()
++            SeasonProgressPatch.onView(newReply)
+         }
+         return newReply
+     }
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/settings/Settings.kt b/integrations/app/src/main/java/app/revanced/bilibili/settings/Settings.kt
+index e720d5f..d7e28e9 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/settings/Settings.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/settings/Settings.kt
+@@ -110,6 +110,11 @@ object Settings {
+     @JvmField val DynRmCm = BooleanSetting(key = "dynamic_rm_cm")
+     @JvmField val DynRmStory = BooleanSetting(key = "dynamic_rm_story")
+     @JvmField val DynNoUpRecall = BooleanSetting(key = "dynamic_no_up_recall", needReboot = true)
++    @JvmField val DynRmCommentPreview = BooleanSetting(key = "dynamic_rm_comment_preview")
++    @JvmField val DynUnfold = BooleanSetting(key = "dynamic_unfold")
++    @JvmField val DynRmOnlyFansAll = BooleanSetting(key = "dynamic_rm_only_fans_all")
++    @JvmField val DynFollowGroupFilter = BooleanSetting(key = "dynamic_follow_group_filter")
++    @JvmField val DynFollowGroupIds = StringSetSetting(key = "dynamic_follow_group_ids")
+     // endregion
+ 
+ 
+@@ -134,6 +139,7 @@ object Settings {
+     @JvmField val DefaultMaxQn = BooleanSetting(key = "default_max_qn")
+     @JvmField val DisableSlideLeft = BooleanSetting(key = "disable_slide_left")
+     @JvmField val DisableAutoFloat = BooleanSetting(key = "disable_auto_float")
++    @JvmField val LiveHomePause = BooleanSetting(key = "live_home_pause")
+     @JvmField val RemoveLiveWatermark = BooleanSetting(key = "remove_live_watermark")
+     @JvmField val LiveNoBlock = BooleanSetting(key = "live_no_block")
+     // endregion
+@@ -154,7 +160,7 @@ object Settings {
+     @JvmField val BlockUpRcmdAds = BooleanSetting(key = "block_up_rcmd_ads")
+     @JvmField val BlockBangumiPageAds = BooleanSetting(key = "block_bangumi_page_ads")
+     @JvmField val RemoveRelateNothing =
+-        BooleanSetting(key = "remove_video_relate_nothing", defValue = true)
++        BooleanSetting(key = "remove_video_relate_nothing")
+     @JvmField val RemoveRelatePromote = BooleanSetting(key = "remove_video_relate_promote")
+     @JvmField val RemoveRelateOnlyAv =
+         BooleanSetting(key = "remove_video_relate_only_av", dependency = RemoveRelatePromote)
+@@ -188,6 +194,26 @@ object Settings {
+     @JvmField val UnlockGif = BooleanSetting(key = "unlock_gif")
+     @JvmField val TimeAirborne = BooleanSetting(key = "time_airborne")
+     @JvmField val OldDmPanel = BooleanSetting(key = "old_dm_panel")
++    @JvmField val HideBangumiRating = BooleanSetting(key = "hide_bangumi_rating")
++    @JvmField val HideBangumiSponsor = BooleanSetting(key = "hide_bangumi_sponsor")
++    @JvmField val HideVideoShare = BooleanSetting(key = "hide_video_share")
++    @JvmField val VideoTools = BooleanSetting(key = "video_tools", defValue = true)
++    @JvmField val HideNote = BooleanSetting(key = "hide_note")
++    @JvmField val SimplifyCommentLocation = BooleanSetting(key = "simplify_comment_location")
++    @JvmField val SimplifyCommentMedal = BooleanSetting(key = "simplify_comment_medal")
++    @JvmField val SimplifyCommentGarb = BooleanSetting(key = "simplify_comment_garb")
++    @JvmField val SimplifyCommentVip = BooleanSetting(key = "simplify_comment_vip")
++    @JvmField val SimplifyCommentLabels = BooleanSetting(key = "simplify_comment_labels")
++    @JvmField val CommentReplaceRules = StringSetting(key = "comment_replace_rules")
++    @JvmField val DmUnescape = BooleanSetting(key = "dm_unescape")
++    @JvmField val DmMerge = BooleanSetting(key = "dm_merge")
++    @JvmField val DmMergeInterval = IntSetting(key = "dm_merge_interval", defValue = 20)
++    @JvmField val ExpandVideoDesc = BooleanSetting(key = "expand_video_desc")
++    @JvmField val SkipChargeThanks = BooleanSetting(key = "skip_charge_thanks")
++    @JvmField val RememberSeasonProgress = BooleanSetting(key = "remember_season_progress")
++    @JvmField val AutoRemoveWatchLater = BooleanSetting(key = "auto_remove_watch_later")
++    @JvmField val AutoPlaySameUp = BooleanSetting(key = "auto_play_same_up")
++    @JvmField val AutoPlayAvOnly = BooleanSetting(key = "auto_play_av_only")
+     // endregion
+ 
+ 
+@@ -204,7 +230,7 @@ object Settings {
+     @JvmField @Deprecated("replaced by PurifySearchTypes") val PurifySearch = BooleanSetting(key = "purify_search")
+     @JvmField val PurifySearchTypes =
+         StringSetSetting(key = "purify_search_types", defValue = setOf("trending", "recommend"))
+-    @JvmField val LimitSearchResults = BooleanSetting(key = "limit_search_results_to_five", defValue = true)
++    @JvmField val LimitSearchResults = BooleanSetting(key = "limit_search_results_to_five")
+     @JvmField val SearchBangumi = BooleanSetting(key = "search_area_bangumi")
+     @JvmField val SearchMovie = BooleanSetting(key = "search_area_movie")
+     @JvmField val FilterSearchType = StringSetSetting(key = "filter_search_type")
+@@ -213,6 +239,8 @@ object Settings {
+     @JvmField val FilterSearchUp = StringSetSetting(key = "filter_search_up")
+     @JvmField val FilterSearchUpRegexMode = BooleanSetting(key = "filter_search_up_regex")
+     @JvmField val FilterSearchUid = StringSetSetting(key = "filter_search_uid")
++    @JvmField val SearchJump = BooleanSetting(key = "search_jump")
++    @JvmField val SearchJumpNumber = BooleanSetting(key = "search_jump_number", dependency = SearchJump)
+     // endregion
+ 
+ 
+@@ -279,6 +307,12 @@ object Settings {
+     })
+     @JvmField val DisallowCollectPrivacyInfo = BooleanSetting(key = "disallow_collect_privacy_info", needReboot = true)
+     @JvmField val DisableWebViewNonOfficialAlert = BooleanSetting(key = "disable_non_official_alert")
++    @JvmField val HideAvatarPendant = BooleanSetting(key = "hide_avatar_pendant")
++    @JvmField val ShowFollowTime = BooleanSetting(key = "show_follow_time")
++    @JvmField val CustomFont = BooleanSetting(key = "custom_font", needReboot = true)
++    @JvmField val NightSchedule = BooleanSetting(key = "night_schedule")
++    @JvmField val NightScheduleStart = StringSetting(key = "night_schedule_start", defValue = "22:00")
++    @JvmField val NightScheduleEnd = StringSetting(key = "night_schedule_end", defValue = "07:00")
+     // endregion
+ 
+ 
+@@ -288,5 +322,8 @@ object Settings {
+     @JvmField val CustomColor = IntSetting(key = "biliroaming_custom_color", defValue = Color.WHITE)
+     @JvmField val SkinJson = StringSetting(key = "skin_json", dependency = Skin)
+     @JvmField val SelectedPlaybackSpeed = FloatSetting(key = "selected_playback_speed")
++    @JvmField val SeasonProgressMap = StringSetting(key = "season_progress_map")
++    @JvmField val DynFollowGroupMids = StringSetting(key = "dynamic_follow_group_mids")
++    @JvmField val DynFollowGroupMidsTime = LongSetting(key = "dynamic_follow_group_mids_time")
+     // endregion
+ }
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/MiscFragment.kt b/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/MiscFragment.kt
+index 5d4e5d0..5241e95 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/MiscFragment.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/MiscFragment.kt
+@@ -12,6 +12,8 @@ import android.widget.EditText
+ import android.widget.FrameLayout
+ import android.widget.ScrollView
+ import androidx.preference.Preference
++import androidx.preference.TwoStatePreference
++import app.revanced.bilibili.patches.FontPatch
+ import app.revanced.bilibili.patches.SplashPatch
+ import app.revanced.bilibili.settings.Settings
+ import app.revanced.bilibili.settings.search.annotation.SettingFragment
+@@ -23,6 +25,7 @@ class MiscFragment : BiliRoamingBaseSettingFragment() {
+     companion object {
+         private const val SELECTION_SPLASH = 222
+         private const val SELECTION_LOGO = 223
++        private const val SELECTION_FONT = 224
+     }
+ 
+     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
+@@ -39,6 +42,10 @@ class MiscFragment : BiliRoamingBaseSettingFragment() {
+             if (newValue == true) selectImage(SELECTION_LOGO)
+             true
+         }
++        findPreference<Preference>(Settings.CustomFont.key)?.onChange { _, newValue ->
++            if (newValue == true) selectFont()
++            true
++        }
+         disablePreference(
+             key = Settings.CustomUpdate.key,
+             { Utils.getString("biliroaming_custom_update_only_64") } to { !isOsArchArm64 },
+@@ -79,6 +86,23 @@ class MiscFragment : BiliRoamingBaseSettingFragment() {
+                 Logger.error(e) { "failed to apply splash image" }
+             }
+         }
++        if (requestCode == SELECTION_FONT) {
++            val destFile = FontPatch.fontFile
++            if (resultCode == Activity.RESULT_CANCELED || uri == null) {
++                destFile.delete()
++                Settings.CustomFont.set(false)
++                (findPreference<Preference>(Settings.CustomFont.key) as? TwoStatePreference)?.isChecked = false
++            } else try {
++                Utils.getContext().contentResolver.openInputStream(uri)?.use { input ->
++                    destFile.outputStream().use { output -> input.copyTo(output) }
++                }
++                Toasts.showShort("字体已保存，重启应用后生效")
++            } catch (e: Exception) {
++                Logger.error(e) { "failed to copy custom font" }
++                destFile.delete()
++            }
++            return
++        }
+         if (resultCode != Activity.RESULT_OK || uri == null) return
+         if (requestCode == 2336) {
+             try {
+@@ -162,6 +186,21 @@ class MiscFragment : BiliRoamingBaseSettingFragment() {
+             }.show()
+     }
+ 
++    private fun selectFont() = try {
++        @Suppress("DEPRECATION")
++        startActivityForResult(Intent.createChooser(Intent().apply {
++            action = Intent.ACTION_GET_CONTENT
++            type = "*/*"
++            putExtra(
++                Intent.EXTRA_MIME_TYPES,
++                arrayOf("font/ttf", "font/otf", "application/x-font-ttf", "application/octet-stream")
++            )
++            addCategory(Intent.CATEGORY_OPENABLE)
++        }, Utils.getString("biliroaming_custom_font_choose")), SELECTION_FONT)
++    } catch (ex: ActivityNotFoundException) {
++        Toasts.showShortWithId("biliroaming_pls_install_file_manager")
++    }
++
+     private fun selectImage(request: Int) = try {
+         @Suppress("DEPRECATION")
+         startActivityForResult(Intent.createChooser(Intent().apply {
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/ToolFragment.kt b/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/ToolFragment.kt
+index 0708216..570c464 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/ToolFragment.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/ToolFragment.kt
+@@ -45,6 +45,60 @@ class ToolFragment : BiliRoamingBaseSettingFragment() {
+             }
+             true
+         }
++        findPreference<Preference>("batch_delete_dynamics")?.onClick {
++            batchDeleteDynamics()
++            true
++        }
++    }
++
++    // Bilibili-Evolved "批量删除动态"
++    private fun batchDeleteDynamics() {
++        if (!Accounts.isLogin) {
++            Toasts.showShort("请先登录")
++            return
++        }
++        val ctx = context ?: return
++        Toasts.showShort("正在获取动态列表…")
++        Utils.async {
++            val (items, message) = DynamicTools.fetchMine(limit = 100)
++            Utils.runOnMainThread {
++                if (items.isNullOrEmpty()) {
++                    Toasts.showShort(if (message.isEmpty()) "没有找到动态" else "获取失败：$message")
++                    return@runOnMainThread
++                }
++                val labels = items.map { it.label }.toTypedArray()
++                val checked = BooleanArray(items.size)
++                AlertDialog.Builder(ctx)
++                    .setTitle("批量删除动态（最近 ${items.size} 条）")
++                    .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
++                        checked[which] = isChecked
++                    }
++                    .setNegativeButton(android.R.string.cancel, null)
++                    .setPositiveButton("删除选中") { _, _ ->
++                        val selected = items.filterIndexed { i, _ -> checked[i] }
++                        if (selected.isEmpty()) {
++                            Toasts.showShort("未选择任何动态")
++                            return@setPositiveButton
++                        }
++                        AlertDialog.Builder(ctx)
++                            .setTitle("确认删除")
++                            .setMessage("将删除 ${selected.size} 条动态，此操作不可恢复。")
++                            .setNegativeButton(android.R.string.cancel, null)
++                            .setPositiveButton(android.R.string.ok) { _, _ -> deleteDynamics(selected) }
++                            .show()
++                    }
++                    .show()
++            }
++        }
++    }
++
++    private fun deleteDynamics(items: List<DynamicTools.Item>) = Utils.async {
++        var success = 0
++        for ((i, item) in items.withIndex()) {
++            if (DynamicTools.delete(item.idStr)) success++
++            if (i != items.lastIndex) Thread.sleep(500)
++        }
++        Toasts.showLong("已删除 $success / ${items.size} 条动态")
+     }
+ 
+     private fun route() {
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/fragments.kt b/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/fragments.kt
+index 68d672d..467d5ba 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/fragments.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/fragments.kt
+@@ -11,9 +11,6 @@ class BlockFollowFragment : BiliRoamingBaseSettingFragment()
+ class CustomizeBottomFragment :
+     BaseDynamicItemsFragment(Settings.ShowingBottomItems, JSONPatch.bottomItems)
+ 
+-@SettingFragment("biliroaming_setting_customize_dynamic")
+-class CustomizeDynamicFragment : BiliRoamingBaseSettingFragment()
+-
+ @SettingFragment("biliroaming_setting_home_tab")
+ class CustomizeHomeTabFragment : BiliRoamingBaseSettingFragment()
+ 
+@@ -32,6 +29,12 @@ class DisplaySizeFragment : BiliRoamingBaseSettingFragment()
+ @SettingFragment("biliroaming_setting_filter_comment")
+ class FilterCommentFragment : BiliRoamingBaseSettingFragment()
+ 
++@SettingFragment("biliroaming_setting_simplify_comment")
++class SimplifyCommentFragment : BiliRoamingBaseSettingFragment()
++
++@SettingFragment("biliroaming_setting_remove_ads")
++class RemoveAdsFragment : BiliRoamingBaseSettingFragment()
++
+ @SettingFragment("biliroaming_setting_filter_dynamic_by_type")
+ class FilterDynamicByTypeFragment : BiliRoamingBaseSettingFragment()
+ 
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/utils/KtUtils.kt b/integrations/app/src/main/java/app/revanced/bilibili/utils/KtUtils.kt
+index f219e6d..7587c31 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/utils/KtUtils.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/utils/KtUtils.kt
+@@ -788,7 +788,7 @@ inline fun <reified T> Context.requireSystemService(): T = getSystemService(T::c
+ 
+ inline val String.safeContent: String
+     get() = Accounts.accessKey.let {
+-        if (it.isNotEmpty() && isNotEmpty()) replace(it, "114514") else it
++        if (it.isNotEmpty() && isNotEmpty()) replace(it, "114514") else this
+     }
+ 
+ inline fun <T> List<T>.forEachIndexedReversed(action: (index: Int, T) -> Unit) {
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/utils/Themes.kt b/integrations/app/src/main/java/app/revanced/bilibili/utils/Themes.kt
+index 2e7fd30..43e56bf 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/utils/Themes.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/utils/Themes.kt
+@@ -34,6 +34,7 @@ object Themes {
+         get() = File(garbDir, "last.garb.conf")
+ 
+     val currentThemeId get() = blkvPrefs.getInt("theme_entries_current_key", 0)
++    val lastThemeId get() = blkvPrefs.getInt("theme_entries_last_key", 0)
+     val isNightTheme get() = currentThemeId == 1
+     val isWhiteTheme get() = currentThemeId == 8
+ 
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/json/patch/PegasusPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/json/patch/PegasusPatch.kt
+index 2f85601..7f9876f 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/json/patch/PegasusPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/json/patch/PegasusPatch.kt
+@@ -53,28 +53,31 @@ object PegasusPatch : BytecodePatch(
+                 mutableClass.methods.add(it)
+             }
+         } ?: throw PegasusParserFingerprint.exception
+-        val (stockBannersItemClass, bannerItemFiled) = context.classes.firstNotNullOfOrNull { c ->
++        // Since 8.92.1, banner_item moved to an obfuscated Gson model, so the fastjson
++        // BasicIndexItem field may be absent. Skip banner proxying instead of failing the feed hook.
++        context.classes.firstNotNullOfOrNull { c ->
+             if (c.superclass == "Lcom/bilibili/pegasus/api/model/BasicIndexItem;") c.fields.find {
+                 it.annotation("Lcom/alibaba/fastjson/annotation/JSONField;")
+                     ?.value<StringEncodedValue>("name")?.value == "banner_item"
+             }?.let { c to it } else null
+-        } ?: throw PatchException("not found banner item field")
+-        val myBannersItemClassName = "Lapp/revanced/bilibili/meta/pegasus/BannersItem;"
+-        val myBannersItemClass = context.findClass(myBannersItemClassName)!!
+-        stockBannersItemClass.proxy(context).setSuperClass(myBannersItemClassName)
+-        myBannersItemClass.mutableClass.methods.run {
+-            find { it.name == "getBanners" }?.also { remove(it) }
+-                ?.cloneMutable(3, clearImplementation = true)
+-                ?.apply {
+-                    addInstructions(
+-                        """
+-                        move-object v0, p0
+-                        check-cast v0, $stockBannersItemClass
+-                        iget-object v1, v0, $bannerItemFiled
+-                        return-object v1
+-                    """.trimIndent()
+-                    )
+-                }?.also { add(it) }
++        }?.let { (stockBannersItemClass, bannerItemFiled) ->
++            val myBannersItemClassName = "Lapp/revanced/bilibili/meta/pegasus/BannersItem;"
++            val myBannersItemClass = context.findClass(myBannersItemClassName)!!
++            stockBannersItemClass.proxy(context).setSuperClass(myBannersItemClassName)
++            myBannersItemClass.mutableClass.methods.run {
++                find { it.name == "getBanners" }?.also { remove(it) }
++                    ?.cloneMutable(3, clearImplementation = true)
++                    ?.apply {
++                        addInstructions(
++                            """
++                            move-object v0, p0
++                            check-cast v0, $stockBannersItemClass
++                            iget-object v1, v0, $bannerItemFiled
++                            return-object v1
++                        """.trimIndent()
++                        )
++                    }?.also { add(it) }
++            }
+         }
+         fun MutableMethod.hookOnFeedClick() = addInstructionsWithLabels(
+             0, """
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/notification/fingerprints/NotificationStyleAbFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/notification/fingerprints/NotificationStyleAbFingerprint.kt
+index 85e7765..f2c45bb 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/notification/fingerprints/NotificationStyleAbFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/notification/fingerprints/NotificationStyleAbFingerprint.kt
+@@ -7,3 +7,13 @@ object NotificationStyleAbFingerprint : MethodFingerprint(
+     returnType = "Z",
+     parameters = listOf()
+ )
++
++/**
++ * Since 8.92.x the A/B flag was replaced by a device decision
++ * `DeviceDecision.getBoolean("dd_enable_system_media_control", false)`.
++ */
++object SystemMediaControlDecisionFingerprint : MethodFingerprint(
++    strings = listOf("dd_enable_system_media_control"),
++    returnType = "Z",
++    parameters = listOf()
++)
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/notification/patch/MusicNotificationPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/notification/patch/MusicNotificationPatch.kt
+index dd756b1..6cce28c 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/notification/patch/MusicNotificationPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/notification/patch/MusicNotificationPatch.kt
+@@ -14,6 +14,7 @@ import app.revanced.patches.bilibili.misc.notification.fingerprints.HeadsetMedia
+ import app.revanced.patches.bilibili.misc.notification.fingerprints.LiveNotificationHelperFingerprint
+ import app.revanced.patches.bilibili.misc.notification.fingerprints.MediaSessionCallbackApi21Fingerprint
+ import app.revanced.patches.bilibili.misc.notification.fingerprints.NotificationStyleAbFingerprint
++import app.revanced.patches.bilibili.misc.notification.fingerprints.SystemMediaControlDecisionFingerprint
+ import app.revanced.patches.bilibili.utils.*
+ import app.revanced.util.exception
+ import app.revanced.util.findMutableMethodOf
+@@ -38,6 +39,7 @@ object MusicNotificationPatch : BytecodePatch(
+     fingerprints = setOf(
+         LiveNotificationHelperFingerprint,
+         NotificationStyleAbFingerprint,
++        SystemMediaControlDecisionFingerprint,
+         MediaSessionCallbackApi21Fingerprint,
+         HeadsetMediaSessionCallbackFingerprint,
+     )
+@@ -45,7 +47,7 @@ object MusicNotificationPatch : BytecodePatch(
+     override fun execute(context: BytecodeContext) {
+         val patchClass = context.findClass("Lapp/revanced/bilibili/patches/MusicNotificationPatch;")!!.mutableClass
+ 
+-        NotificationStyleAbFingerprint.result?.mutableMethod?.addInstructionsWithLabels(
++        (NotificationStyleAbFingerprint.result ?: SystemMediaControlDecisionFingerprint.result)?.mutableMethod?.addInstructionsWithLabels(
+             0, """
+             invoke-static {}, $patchClass->enabled()Z
+             move-result v0
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/UniteDownloadMenuInvokeFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/UniteDownloadMenuInvokeFingerprint.kt
+index 31e07f8..ce68f0e 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/UniteDownloadMenuInvokeFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/UniteDownloadMenuInvokeFingerprint.kt
+@@ -1,9 +1,24 @@
+ package app.revanced.patches.bilibili.misc.other.fingerprints
+ 
+ import app.revanced.patcher.fingerprint.MethodFingerprint
++import com.android.tools.smali.dexlib2.AccessFlags
+ 
+ object UniteDownloadMenuInvokeFingerprint : MethodFingerprint(
+     strings = listOf("click download"),
+     parameters = listOf(),
+     returnType = "V",
+ )
++
++/**
++ * Since 8.92.x the unite page download menu action is a static Kotlin lambda
++ * `static Unit lambda(MenuService)` inside the theseus united MenuService.
++ */
++object UniteDownloadMenuStaticInvokeFingerprint : MethodFingerprint(
++    strings = listOf("click download"),
++    returnType = "Lkotlin/Unit;",
++    customFingerprint = { methodDef, classDef ->
++        AccessFlags.STATIC.isSet(methodDef.accessFlags)
++                && methodDef.parameterTypes.size == 1 && methodDef.parameterTypes[0] == classDef.type
++                && classDef.type.contains("/theseus/united/")
++    }
++)
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/AutoLikePatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/AutoLikePatch.kt
+index 9a27f5f..962d6d6 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/AutoLikePatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/AutoLikePatch.kt
+@@ -22,8 +22,9 @@ import com.android.tools.smali.dexlib2.Opcode
+ )
+ object AutoLikePatch : BytecodePatch(setOf(SectionFingerprint)) {
+     override fun execute(context: BytecodeContext) {
+-        val clazz = SectionFingerprint.result?.mutableClass
+-            ?: throw SectionFingerprint.exception
++        // Legacy (non-unite) video detail page only. 8.92.x uses the unite page, whose auto like
++        // is driven by ViewUniteReplyHook -> AutoLikePatch.autoLikeUnite(), so skip quietly.
++        val clazz = SectionFingerprint.result?.mutableClass ?: return
+         val likeMethod = context.classes.first { it.type == clazz.superclass }.virtualMethods.find { m ->
+             m.parameterTypes.size == 1 && m.returnType == "V" && !AccessFlags.FINAL.isSet(m.accessFlags)
+         } ?: throw PatchException("can not found like method")
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/BLRoutePatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/BLRoutePatch.kt
+index 3b5884c..29e9fc1 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/BLRoutePatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/BLRoutePatch.kt
+@@ -3,6 +3,7 @@ package app.revanced.patches.bilibili.misc.other.patch
+ import app.revanced.patcher.data.BytecodeContext
+ import app.revanced.patcher.extensions.InstructionExtensions.addInstructions
+ import app.revanced.patcher.patch.BytecodePatch
++import app.revanced.patcher.patch.PatchException
+ import app.revanced.patcher.patch.annotation.CompatiblePackage
+ import app.revanced.patcher.patch.annotation.Patch
+ import app.revanced.patches.bilibili.misc.other.fingerprints.BLRouteBuilderFingerprint
+@@ -22,28 +23,48 @@ import app.revanced.util.exception
+     ]
+ )
+ object BLRoutePatch : BytecodePatch(setOf(BLRouteBuilderFingerprint, RouteRequestFingerprint)) {
++    private const val PATCH_CLASS = "Lapp/revanced/bilibili/patches/BLRoutePatch;"
++
+     override fun execute(context: BytecodeContext) {
+-        BLRouteBuilderFingerprint.result?.mutableClass?.methods?.find { m ->
++        val routeRequest = RouteRequestFingerprint.result?.classDef
++            ?: throw RouteRequestFingerprint.exception
++        // Since 8.92.x the Builder's toString (fingerprint string) was stripped,
++        // but it is still the unobfuscated nested class of RouteRequest.
++        val builderClass = BLRouteBuilderFingerprint.result?.mutableClass
++            ?: context.findClass(routeRequest.type.removeSuffix(";") + "\$Builder;")?.mutableClass
++            ?: throw BLRouteBuilderFingerprint.exception
++        builderClass.methods.find { m ->
+             m.name == "<init>" && m.parameterTypes.let { it.size == 1 && it[0] == "Landroid/net/Uri;" }
+         }?.addInstructions(
+             0, """
+-            invoke-static {p1}, Lapp/revanced/bilibili/patches/BLRoutePatch;->intercept(Landroid/net/Uri;)Landroid/net/Uri;
++            invoke-static {p1}, $PATCH_CLASS->intercept(Landroid/net/Uri;)Landroid/net/Uri;
++            move-result-object p1
++        """.trimIndent()
++        ) ?: throw PatchException("not found RouteRequest.Builder(Uri) constructor")
++        // Builder(String) no longer delegates to Builder(Uri) on 8.92.x
++        builderClass.methods.find { m ->
++            m.name == "<init>" && m.parameterTypes.let { it.size == 1 && it[0] == "Ljava/lang/String;" }
++        }?.addInstructions(
++            0, """
++            invoke-static {p1}, $PATCH_CLASS->intercept(Ljava/lang/String;)Ljava/lang/String;
+             move-result-object p1
+         """.trimIndent()
+-        ) ?: throw BLRouteBuilderFingerprint.exception
+-        val result = RouteRequestFingerprint.result
+-        result?.mutableClass?.methods?.find { m ->
++        )
++        // older versions: RouteRequest(Uri, ...) did not go through the Builder
++        RouteRequestFingerprint.result?.mutableClass?.methods?.find { m ->
+             m.name == "<init>" && m.parameterTypes.let { it.size == 2 && it[0] == "Landroid/net/Uri;" }
+         }?.addInstructions(
+             0, """
+-            invoke-static {p1}, Lapp/revanced/bilibili/patches/BLRoutePatch;->intercept(Landroid/net/Uri;)Landroid/net/Uri;
++            invoke-static {p1}, $PATCH_CLASS->intercept(Landroid/net/Uri;)Landroid/net/Uri;
+             move-result-object p1
+         """.trimIndent()
+-        ) ?: throw RouteRequestFingerprint.exception
++        )
++        if (routeRequest.methods.none { it.name == "<init>" && it.parameterTypes == listOf("Landroid/net/Uri;") })
++            throw PatchException("not found RouteRequest(Uri) constructor")
+         val routeToMethod = context.classes.asSequence().flatMap { it.methods }.first { m ->
+             m.accessFlags.let { it.isStatic() && it.isPublic() }
+                     && m.parameterTypes == listOf(
+-                result.classDef.type, "Landroid/content/Context;"
++                routeRequest.type, "Landroid/content/Context;"
+             )
+         }
+         val utilsClass = context.findClass("Lapp/revanced/bilibili/utils/Utils;")!!.mutableClass
+@@ -52,8 +73,8 @@ object BLRoutePatch : BytecodePatch(setOf(BLRouteBuilderFingerprint, RouteReques
+             .cloneMutable(registerCount = 3, clearImplementation = true).apply {
+                 addInstructions(
+                     """
+-                    new-instance v0, ${result.classDef}
+-                    invoke-direct {v0, p0}, ${result.classDef}-><init>(Landroid/net/Uri;)V
++                    new-instance v0, ${routeRequest.type}
++                    invoke-direct {v0, p0}, ${routeRequest.type}-><init>(Landroid/net/Uri;)V
+                     invoke-static {v0, p1}, $routeToMethod
+                     return-void
+                 """.trimIndent()
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/CacheRedirectPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/CacheRedirectPatch.kt
+index ba17488..40098bf 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/CacheRedirectPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/CacheRedirectPatch.kt
+@@ -8,6 +8,8 @@ import app.revanced.patcher.patch.annotation.Patch
+ import app.revanced.patches.bilibili.misc.other.fingerprints.OnOgvDownloadFingerprint
+ import app.revanced.patches.bilibili.misc.other.fingerprints.TheseusOnOgvDownloadFingerprint
+ import app.revanced.patches.bilibili.misc.other.fingerprints.UniteDownloadMenuInvokeFingerprint
++import app.revanced.patches.bilibili.misc.other.fingerprints.UniteDownloadMenuStaticInvokeFingerprint
++import app.revanced.patcher.patch.PatchException
+ import app.revanced.patches.bilibili.misc.settings.patch.SettingsResourcePatch
+ import app.revanced.patches.bilibili.patcher.patch.MultiMethodBytecodePatch
+ import app.revanced.patches.bilibili.utils.*
+@@ -27,7 +29,7 @@ import com.android.tools.smali.dexlib2.iface.value.IntEncodedValue
+     dependencies = [ResourceMappingPatch::class, SettingsResourcePatch::class]
+ )
+ object CacheRedirectPatch : MultiMethodBytecodePatch(
+-    fingerprints = setOf(UniteDownloadMenuInvokeFingerprint, TheseusOnOgvDownloadFingerprint),
++    fingerprints = setOf(UniteDownloadMenuInvokeFingerprint, UniteDownloadMenuStaticInvokeFingerprint, TheseusOnOgvDownloadFingerprint),
+     multiFingerprints = setOf(OnOgvDownloadFingerprint)
+ ) {
+     override fun execute(context: BytecodeContext) {
+@@ -75,9 +77,10 @@ object CacheRedirectPatch : MultiMethodBytecodePatch(
+                 }.also { methods.add(it) }
+             }
+         }
+-        OnOgvDownloadFingerprint.result.ifEmpty {
++        // legacy bangumi page only; absent since the theseus ogv page (8.92.x), so do not fail here
++        if (OnOgvDownloadFingerprint.result.isEmpty() && TheseusOnOgvDownloadFingerprint.result == null)
+             throw OnOgvDownloadFingerprint.exception
+-        }.forEach { r ->
++        OnOgvDownloadFingerprint.result.forEach { r ->
+             val originMethod = r.mutableMethod
+             originMethod.cloneMutable(registerCount = 4, clearImplementation = true).apply {
+                 originMethod.name += "_Origin"
+@@ -113,6 +116,27 @@ object CacheRedirectPatch : MultiMethodBytecodePatch(
+                 )
+             }.also { mutableClass.methods.add(it) }
+         }
++        // 8.92.x: static lambda Unit lambda(MenuService)
++        UniteDownloadMenuStaticInvokeFingerprint.result?.run {
++            val originMethodName = mutableMethod.name + "_Origin"
++            if ((mutableMethod.implementation?.registerCount ?: 0) < 2)
++                throw PatchException("unite download menu lambda has no free register")
++            mutableMethod.cloneMutable(name = originMethodName).let {
++                mutableClass.methods.add(it)
++            }
++            mutableMethod.addInstructionsWithLabels(
++                0, """
++                const-string v0, "$originMethodName"
++                invoke-static {p0, v0}, Lapp/revanced/bilibili/patches/CacheRedirectPatch;->onUniteDownloadMenuStaticClick(Ljava/lang/Object;Ljava/lang/String;)Z
++                move-result v0
++                if-eqz v0, :jump
++                sget-object v0, Lkotlin/Unit;->INSTANCE:Lkotlin/Unit;
++                return-object v0
++                :jump
++                nop
++            """.trimIndent()
++            )
++        }
+         // start from 7.80.0
+         UniteDownloadMenuInvokeFingerprint.result?.run {
+             val originMethodName = mutableMethod.name + "_Origin"
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ForbidLiveRoomAutoFloatPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ForbidLiveRoomAutoFloatPatch.kt
+index e56d221..38b2e91 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ForbidLiveRoomAutoFloatPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ForbidLiveRoomAutoFloatPatch.kt
+@@ -15,6 +15,10 @@ import app.revanced.patches.bilibili.utils.isNative
+ import app.revanced.util.exception
+ import app.revanced.util.findMutableMethodOf
+ import com.android.tools.smali.dexlib2.Opcode
++import com.android.tools.smali.dexlib2.iface.Method
++import com.android.tools.smali.dexlib2.iface.instruction.Instruction
++import com.android.tools.smali.dexlib2.iface.instruction.OneRegisterInstruction
++import com.android.tools.smali.dexlib2.iface.instruction.TwoRegisterInstruction
+ import com.android.tools.smali.dexlib2.iface.instruction.formats.Instruction11n
+ import com.android.tools.smali.dexlib2.iface.instruction.formats.Instruction35c
+ 
+@@ -28,38 +32,86 @@ import com.android.tools.smali.dexlib2.iface.instruction.formats.Instruction35c
+     ]
+ )
+ object ForbidLiveRoomAutoFloatPatch : BytecodePatch(setOf(LiveRoomSetFloatWindowFingerprint)) {
++    private const val DISABLE_METHOD = "Lapp/revanced/bilibili/patches/LiveRoomPatch;->disableAutoFloat()Z"
++
++    /** Opcodes that overwrite registerA without reading it. */
++    private val WRITE_ONLY_OPCODES = setOf(
++        Opcode.CONST_4, Opcode.CONST_16, Opcode.CONST, Opcode.CONST_HIGH16, Opcode.CONST_STRING,
++        Opcode.SGET, Opcode.SGET_OBJECT, Opcode.SGET_BOOLEAN, Opcode.NEW_INSTANCE,
++        Opcode.IGET, Opcode.IGET_OBJECT, Opcode.IGET_BOOLEAN,
++    )
++
++    private sealed interface Site {
++        val method: Method
++        val invokeIndex: Int
++    }
++
++    /** if-eqz; const/4 vX; invoke-interface {obj, vX} (older versions) */
++    private class ConstSite(override val method: Method, override val invokeIndex: Int, val register: Int) : Site
++
++    /** if-eqz; invoke-interface {obj, vX}; <write-only vT> (8.92.x, the const was hoisted by R8) */
++    private class HoistedSite(override val method: Method, override val invokeIndex: Int, val tempRegister: Int) : Site
++
+     override fun execute(context: BytecodeContext) {
+         val (setClass, setMethod) = LiveRoomSetFloatWindowFingerprint.result?.let {
+             it.classDef to it.method
+         } ?: throw LiveRoomSetFloatWindowFingerprint.exception
+-        val iSetMethodSign = setMethod.toMutable().apply {
+-            definingClass = setClass.interfaces.first()
+-        }.toString()
+-        context.classes.asSequence().flatMap { it.methods }.filter { m ->
++        val iSetMethodSigns = setClass.interfaces.map { iface ->
++            setMethod.toMutable().apply { definingClass = iface }.toString()
++        }.toSet()
++        val site = context.classes.asSequence().flatMap { it.methods }.filter { m ->
+             m.accessFlags.let { !it.isAbstract() && !it.isNative() }
+                     && m.parameterTypes.isEmpty() && m.returnType == "V"
+-        }.firstNotNullOfOrNull { m ->
+-            val instructions = m.implementation!!.instructions.toList()
+-            instructions.withIndex().firstNotNullOfOrNull { (index, inst) ->
+-                if (inst.opcode == Opcode.INVOKE_INTERFACE && (inst as Instruction35c).reference.toString() == iSetMethodSign) {
+-                    val ifInst = instructions[index - 2]
+-                    val constInst = instructions[index - 1]
+-                    if (ifInst.opcode == Opcode.IF_EQZ && constInst.opcode == Opcode.CONST_4 && constInst is Instruction11n) {
+-                        index to constInst.registerA
+-                    } else null
+-                } else null
+-            }?.let { (index, register) -> Triple(m, index, register) }
+-        }?.let { (method, index, register) ->
+-            context.findClass(method.definingClass)!!.mutableClass.findMutableMethodOf(method).run {
+-                addInstructionsWithLabels(
+-                    index - 1, """
+-                    invoke-static {}, Lapp/revanced/bilibili/patches/LiveRoomPatch;->disableAutoFloat()Z
+-                    move-result v$register
+-                    if-nez v$register, :next
+-                """.trimIndent(),
+-                    ExternalLabel("next", getInstruction(index + 1))
+-                )
++        }.firstNotNullOfOrNull { m -> findSite(m, iSetMethodSigns) }
++            ?: throw PatchException("not found startMiniFloatPlay method")
++        val method = context.findClass(site.method.definingClass)!!.mutableClass.findMutableMethodOf(site.method)
++        when (site) {
++            is ConstSite -> method.addInstructionsWithLabels(
++                site.invokeIndex - 1, """
++                invoke-static {}, $DISABLE_METHOD
++                move-result v${site.register}
++                if-nez v${site.register}, :next
++            """.trimIndent(),
++                ExternalLabel("next", method.getInstruction(site.invokeIndex + 1))
++            )
++
++            is HoistedSite -> method.addInstructionsWithLabels(
++                site.invokeIndex, """
++                invoke-static {}, $DISABLE_METHOD
++                move-result v${site.tempRegister}
++                if-nez v${site.tempRegister}, :next
++            """.trimIndent(),
++                ExternalLabel("next", method.getInstruction(site.invokeIndex + 1))
++            )
++        }
++    }
++
++    private fun findSite(m: Method, signs: Set<String>): Site? {
++        val instructions = m.implementation!!.instructions.toList()
++        instructions.withIndex().forEach { (index, inst) ->
++            if (inst.opcode != Opcode.INVOKE_INTERFACE || index < 1) return@forEach
++            val invoke = inst as Instruction35c
++            if (invoke.reference.toString() !in signs) return@forEach
++            val prev = instructions[index - 1]
++            if (index >= 2 && instructions[index - 2].opcode == Opcode.IF_EQZ
++                && prev.opcode == Opcode.CONST_4 && prev is Instruction11n
++            ) return ConstSite(m, index, prev.registerA)
++            if (prev.opcode == Opcode.IF_EQZ) {
++                val next = instructions.getOrNull(index + 1) ?: return@forEach
++                val temp = writeOnlyRegister(next) ?: return@forEach
++                if (temp == invoke.registerC || temp == invoke.registerD) return@forEach
++                return HoistedSite(m, index, temp)
+             }
+-        } ?: throw PatchException("not found startMiniFloatPlay method")
++        }
++        return null
++    }
++
++    private fun writeOnlyRegister(inst: Instruction): Int? {
++        if (inst.opcode !in WRITE_ONLY_OPCODES) return null
++        return when (inst) {
++            is TwoRegisterInstruction -> inst.registerA.takeIf { it != inst.registerB }
++            is OneRegisterInstruction -> inst.registerA
++            else -> null
++        }
+     }
+ }
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ForceCommentNavigablePatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ForceCommentNavigablePatch.kt
+index cbe1c8b..78500de 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ForceCommentNavigablePatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ForceCommentNavigablePatch.kt
+@@ -14,6 +14,10 @@ import app.revanced.patches.bilibili.utils.classDescriptor
+ import app.revanced.patches.bilibili.utils.isAbstract
+ import app.revanced.util.getReference
+ import com.android.tools.smali.dexlib2.Opcode
++import com.android.tools.smali.dexlib2.iface.instruction.OneRegisterInstruction
++import com.android.tools.smali.dexlib2.iface.instruction.TwoRegisterInstruction
++import com.android.tools.smali.dexlib2.iface.instruction.FiveRegisterInstruction
++import com.android.tools.smali.dexlib2.iface.reference.MethodReference
+ import com.android.tools.smali.dexlib2.iface.reference.FieldReference
+ 
+ @Patch(
+@@ -39,12 +43,30 @@ object ForceCommentNavigablePatch : BytecodePatch(fingerprints = setOf(CommentCo
+         """.trimIndent()
+         ) ?: throw PatchException("not found PrimaryCommentMainFragment")
+         CommentConfigFingerprint.result?.run {
++            val instructions = mutableMethod.getInstructions()
+             val index = scanResult.stringsScanResult!!.matches.last().index
+-            val seekEnabledField = mutableMethod.getInstructions().withIndex().firstNotNullOf { (i, inst) ->
++            // Resolve the register appended right after "seekEnabled=" back to the field it was loaded from.
++            // Works both when the field is read right before the append (old) and when all fields are
++            // loaded up front before building the string (8.92.x).
++            val seekEnabledField = instructions.withIndex().firstOrNull { (i, inst) ->
++                i > index && inst.opcode == Opcode.INVOKE_VIRTUAL && inst.getReference<MethodReference>().let {
++                    it.definingClass == "Ljava/lang/StringBuilder;" && it.name == "append" && it.parameterTypes == listOf("Z")
++                }
++            }?.index?.let { appendIndex ->
++                val register = (instructions[appendIndex] as FiveRegisterInstruction).registerD
++                // the nearest instruction writing this register must be the field read
++                (appendIndex - 1 downTo 0).map { instructions[it] }.firstOrNull { inst ->
++                    inst.opcode.setsRegister() && when (inst) {
++                        is TwoRegisterInstruction -> inst.registerA == register
++                        is OneRegisterInstruction -> inst.registerA == register
++                        else -> false
++                    }
++                }?.takeIf { it.opcode == Opcode.IGET_BOOLEAN }?.getReference<FieldReference>()
++            } ?: instructions.withIndex().firstNotNullOfOrNull { (i, inst) ->
+                 if (i > index && inst.opcode == Opcode.IGET_BOOLEAN) {
+                     inst.getReference<FieldReference>()
+                 } else null
+-            }
++            } ?: throw PatchException("not found seekEnabled field")
+             mutableClass.methods.first { m ->
+                 m.parameterTypes.isEmpty() && m.returnType == "Z" && !m.accessFlags.isAbstract()
+                         && m.getInstruction(0).let {
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/TrialQualityPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/TrialQualityPatch.kt
+index 2b19c16..21947ca 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/TrialQualityPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/TrialQualityPatch.kt
+@@ -25,19 +25,21 @@ object TrialQualityPatch : MultiMethodBytecodePatch(
+         super.execute(context)
+         val patchMethod = context.findClass("Lapp/revanced/bilibili/patches/TrialQualityPatch;")!!
+             .mutableClass.methods.first { it.name == "onBindOnline" }
+-        QualityViewHolderFingerprint.result.associate { r ->
+-            r.mutableClass.methods to r.mutableClass.methods.first { m ->
+-                m.parameterTypes.let { it.size == 5 && it[1] == "Z" && it[3] == "Landroid/widget/TextView;" && it[4] == "Landroid/widget/TextView;" }
+-            }
++        QualityViewHolderFingerprint.result.distinctBy { it.classDef.type }.mapNotNull { r ->
++            r.mutableClass.methods.firstOrNull { m ->
++                // 8.92.x appends a QualityItemStyle parameter
++                m.parameterTypes.let { (it.size == 5 || it.size == 6) && it[1] == "Z" && it[3] == "Landroid/widget/TextView;" && it[4] == "Landroid/widget/TextView;" }
++            }?.let { r.mutableClass.methods to it }
+         }.ifEmpty {
+             throw QualityViewHolderFingerprint.exception
+         }.forEach { (methods, method) ->
+             val originMethod = method.cloneMutable(name = method.name + "_Origin")
+                 .also { methods.add(it) }
+-            method.also { methods.remove(it) }.cloneMutable(registerCount = 6, clearImplementation = true).apply {
++            val lastParam = method.parameterTypes.size
++            method.also { methods.remove(it) }.cloneMutable(registerCount = lastParam + 1, clearImplementation = true).apply {
+                 addInstructions(
+                     """
+-                    invoke-direct/range {p0 .. p5}, $originMethod
++                    invoke-direct/range {p0 .. p$lastParam}, $originMethod
+                     invoke-static {p2, p4, p5}, $patchMethod
+                     return-void
+                 """.trimIndent()
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/settings/patch/SettingsResourcePatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/settings/patch/SettingsResourcePatch.kt
+index 4de8d01..5da8c55 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/settings/patch/SettingsResourcePatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/settings/patch/SettingsResourcePatch.kt
+@@ -62,6 +62,8 @@ object SettingsResourcePatch : ResourcePatch() {
+         "biliroaming_setting_display_size.xml",
+         "biliroaming_setting_filter_popular.xml",
+         "biliroaming_setting_filter_comment.xml",
++        "biliroaming_setting_simplify_comment.xml",
++        "biliroaming_setting_remove_ads.xml",
+         "biliroaming_setting_subtitle_translate_server.xml",
+         "biliroaming_setting_external_downloader.xml",
+         "biliroaming_setting_story_ui_style.xml",
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/toast/patch/ToastPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/toast/patch/ToastPatch.kt
+index e470b8a..7cdc6bb 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/toast/patch/ToastPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/toast/patch/ToastPatch.kt
+@@ -22,23 +22,39 @@ import com.android.tools.smali.dexlib2.iface.reference.MethodReference
+     ]
+ )
+ object ToastPatch : BytecodePatch() {
++    private const val TOAST_HELPER = "Lcom/bilibili/droid/ToastHelper;"
++    private val SHOW_TOAST_PARAMS = listOf("Landroid/content/Context;", "Ljava/lang/String;", "I", "I")
++
+     override fun execute(context: BytecodeContext) {
+-        val onBackPressedMethod = "Ltv/danmaku/bili/MainActivityV2;".toClassDef(context)
+-            .methods.find { it.name == "onBackPressed" }
+-            ?: throw PatchException("Not found MainActivityV2#onBackPressed method")
+-        val showToastRef = onBackPressedMethod.implementation
+-            ?.instructions?.firstNotNullOfOrNull { s ->
+-                if (s.opcode != Opcode.INVOKE_STATIC)
+-                    return@firstNotNullOfOrNull null
+-                s.getReference<MethodReference>().takeIf {
+-                    it.returnType == "V" && it.parameterTypes ==
+-                            listOf("Landroid/content/Context;", "Ljava/lang/String;", "I", "I")
+-                }
+-            } ?: throw PatchException("Not found show toast method reference")
++        // Since 8.92.x MainActivityV2#onBackPressed no longer shows a toast directly,
++        // but the unobfuscated ToastHelper still exposes the same API. Prefer it.
++        val helperMethods = context.findClass(TOAST_HELPER)?.immutableClass?.methods
++        val showToastRef: String
++        val cancelMethod: String
++        if (helperMethods != null
++            && helperMethods.any { it.name == "showToast" && it.returnType == "V" && it.parameterTypes == SHOW_TOAST_PARAMS }
++            && helperMethods.any { it.name == "cancel" && it.parameterTypes.isEmpty() }
++        ) {
++            showToastRef = "$TOAST_HELPER->showToast(Landroid/content/Context;Ljava/lang/String;II)V"
++            cancelMethod = "$TOAST_HELPER->cancel()V"
++        } else {
++            val onBackPressedMethod = "Ltv/danmaku/bili/MainActivityV2;".toClassDef(context)
++                .methods.find { it.name == "onBackPressed" }
++                ?: throw PatchException("Not found MainActivityV2#onBackPressed method")
++            val ref = onBackPressedMethod.implementation
++                ?.instructions?.firstNotNullOfOrNull { s ->
++                    if (s.opcode != Opcode.INVOKE_STATIC)
++                        return@firstNotNullOfOrNull null
++                    s.getReference<MethodReference>().takeIf {
++                        it.returnType == "V" && it.parameterTypes == SHOW_TOAST_PARAMS
++                    }
++                } ?: throw PatchException("Not found show toast method reference")
++            showToastRef = ref.toString()
++            cancelMethod = ref.definingClass.toClassDef(context).methods
++                .find { it.parameterTypes.isEmpty() && it.name != "<init>" }
++                ?.toString() ?: throw PatchException("Not found cancel toast method")
++        }
+         val myToastsClass = context.findClass("Lapp/revanced/bilibili/utils/Toasts;")!!
+-        val cancelMethod = showToastRef.definingClass.toClassDef(context).methods
+-            .find { it.parameterTypes.isEmpty() && it.name != "<init>" }
+-            ?: throw PatchException("Not found cancel toast method")
+         myToastsClass.mutableClass.methods.run {
+             first { it.name == "show" && it.parameterTypes.size == 4 }.also { remove(it) }
+                 .cloneMutable(registerCount = 4, clearImplementation = true).apply {
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/HwCodecPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/HwCodecPatch.kt
+index 0be7bdd..c643c9c 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/HwCodecPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/HwCodecPatch.kt
+@@ -4,13 +4,15 @@ import app.revanced.patcher.data.BytecodeContext
+ import app.revanced.patcher.extensions.InstructionExtensions.addInstruction
+ import app.revanced.patcher.extensions.InstructionExtensions.addInstructions
+ import app.revanced.patcher.patch.BytecodePatch
++import app.revanced.patcher.patch.PatchException
+ import app.revanced.patcher.patch.annotation.CompatiblePackage
+ import app.revanced.patcher.patch.annotation.Patch
++import app.revanced.patcher.util.proxy.mutableTypes.MutableMethod
+ import app.revanced.patches.bilibili.video.player.fingerprints.IjkMediaPlayerOptionsFingerprint
+-import app.revanced.util.exception
+ import com.android.tools.smali.dexlib2.Opcode
+-import com.android.tools.smali.dexlib2.builder.instruction.BuilderInstruction22c
+-import com.android.tools.smali.dexlib2.builder.instruction.BuilderInstruction35c
++import com.android.tools.smali.dexlib2.iface.instruction.FiveRegisterInstruction
++import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
++import com.android.tools.smali.dexlib2.iface.instruction.TwoRegisterInstruction
+ import com.android.tools.smali.dexlib2.iface.reference.MethodReference
+ 
+ @Patch(
+@@ -23,40 +25,54 @@ import com.android.tools.smali.dexlib2.iface.reference.MethodReference
+     ]
+ )
+ object HwCodecPatch : BytecodePatch(setOf(IjkMediaPlayerOptionsFingerprint)) {
++    private const val PLAYER_ITEM = "Ltv/danmaku/ijk/media/player/IjkMediaPlayerItem;"
++    private const val HW_CODEC_FIELD = "Ltv/danmaku/ijk/media/player/IjkMediaConfigParams;->mEnableHwCodec:Z"
++
+     override fun execute(context: BytecodeContext) {
+-        var indexOffset = 0
+-        IjkMediaPlayerOptionsFingerprint.result?.mutableMethod?.run {
+-            implementation!!.instructions.withIndex().filter { (_, inst) ->
+-                inst.opcode == Opcode.INVOKE_INTERFACE && (inst as BuilderInstruction35c).let {
+-                    val mr = it.reference as MethodReference
+-                    // Ltv/danmaku/ijk/media/player/IIjkMediaPlayerItem;->setOptionBundle(ILandroid/os/Bundle;)V
+-                    mr.returnType == "V" && mr.parameterTypes == listOf("I", "Landroid/os/Bundle;")
+-                }
+-            }.map { (index, inst) ->
+-                index to (inst as BuilderInstruction35c).registerE
+-            }.forEach { (index, register) ->
+-                addInstruction(
+-                    index + (indexOffset++), """
+-                    invoke-static {v$register}, Lapp/revanced/bilibili/patches/HwCodecPatch;->printOptionBundle(Landroid/os/Bundle;)V
+-                """.trimIndent()
+-                )
+-            }
+-            indexOffset = 0
+-            implementation!!.instructions.withIndex().filter { (_, inst) ->
+-                inst.opcode == Opcode.IGET_BOOLEAN && (inst as BuilderInstruction22c).let {
+-                    it.reference.toString() == "Ltv/danmaku/ijk/media/player/IjkMediaConfigParams;->mEnableHwCodec:Z"
+-                }
+-            }.map { (index, inst) ->
+-                (index + 1) to (inst as BuilderInstruction22c).registerA
+-            }.forEach { (index, register) ->
+-                addInstructions(
+-                    index + indexOffset, """
+-                        invoke-static {v$register}, Lapp/revanced/bilibili/patches/HwCodecPatch;->enableHwCodec(Z)Z
+-                        move-result v$register
+-                    """.trimIndent()
+-                )
+-                indexOffset += 2
++        // Since 8.92.x the option method lost one of its fingerprint strings and the codec options
++        // were split into fillMediaCodecOptions(Bundle), so hook every read of the field in the
++        // (unobfuscated) player item class instead of a single fingerprinted method.
++        val methods = context.findClass(PLAYER_ITEM)?.mutableClass?.methods?.filter { it.implementation != null }
++            ?: IjkMediaPlayerOptionsFingerprint.result?.mutableMethod?.let { listOf(it) }
++            ?: throw PatchException("not found IjkMediaPlayerItem")
++        var hookedReads = 0
++        methods.forEach { method ->
++            hookedReads += method.hookHwCodecReads()
++            method.hookOptionBundles()
++        }
++        if (hookedReads == 0) throw PatchException("not found mEnableHwCodec reads")
++    }
++
++    private fun MutableMethod.hookHwCodecReads(): Int {
++        val targets = implementation!!.instructions.withIndex().filter { (_, inst) ->
++            inst.opcode == Opcode.IGET_BOOLEAN
++                    && (inst as ReferenceInstruction).reference.toString() == HW_CODEC_FIELD
++        }.map { (index, inst) -> (index + 1) to (inst as TwoRegisterInstruction).registerA }
++        // insert from the back so earlier indexes stay valid
++        targets.asReversed().forEach { (index, register) ->
++            addInstructions(
++                index, """
++                invoke-static {v$register}, Lapp/revanced/bilibili/patches/HwCodecPatch;->enableHwCodec(Z)Z
++                move-result v$register
++            """.trimIndent()
++            )
++        }
++        return targets.size
++    }
++
++    private fun MutableMethod.hookOptionBundles() {
++        val targets = implementation!!.instructions.withIndex().filter { (_, inst) ->
++            inst.opcode == Opcode.INVOKE_INTERFACE && ((inst as ReferenceInstruction).reference as MethodReference).let {
++                // Ltv/danmaku/ijk/media/player/IIjkMediaPlayerItem;->setOptionBundle(ILandroid/os/Bundle;)V
++                it.returnType == "V" && it.parameterTypes == listOf("I", "Landroid/os/Bundle;")
+             }
+-        } ?: throw IjkMediaPlayerOptionsFingerprint.exception
++        }.map { (index, inst) -> index to (inst as FiveRegisterInstruction).registerE }
++        targets.asReversed().forEach { (index, register) ->
++            addInstruction(
++                index, """
++                invoke-static {v$register}, Lapp/revanced/bilibili/patches/HwCodecPatch;->printOptionBundle(Landroid/os/Bundle;)V
++            """.trimIndent()
++            )
++        }
+     }
+ }
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/RememberPlaybackSpeedPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/RememberPlaybackSpeedPatch.kt
+index 57f3c15..fb86a3d 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/RememberPlaybackSpeedPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/RememberPlaybackSpeedPatch.kt
+@@ -29,6 +29,7 @@ object RememberPlaybackSpeedPatch : MultiMethodBytecodePatch(
+         PlayerSettingCreateSpeedFingerprint,
+         MenuServiceCreateSpeedFingerprint,
+         MenuFuncSegmentFingerprint,
++        UniteMenuSpeedClickFingerprint,
+     ),
+     multiFingerprints = setOf(PlayerSpeedChooseWidgetFingerprint, PlaybackSpeedSettingFingerprint),
+ ) {
+@@ -54,7 +55,7 @@ object RememberPlaybackSpeedPatch : MultiMethodBytecodePatch(
+             """.trimIndent()
+             )
+         } ?: run {
+-            if (SettingsResourcePatch.isPink)
++            if (SettingsResourcePatch.isPink && UniteMenuSpeedClickFingerprint.result == null)
+                 throw PlayerSettingCreateSpeedFingerprint.exception
+         }
+         MenuServiceCreateSpeedFingerprint.result?.run {
+@@ -71,9 +72,25 @@ object RememberPlaybackSpeedPatch : MultiMethodBytecodePatch(
+             """.trimIndent()
+             )
+         } ?: run {
+-            if (SettingsResourcePatch.isPink)
++            if (SettingsResourcePatch.isPink && UniteMenuSpeedClickFingerprint.result == null)
+                 throw MenuServiceCreateSpeedFingerprint.exception
+         }
++        // 8.92.x unite more-menu: record the parsed speed right after Float.parseFloat
++        UniteMenuSpeedClickFingerprint.result?.mutableMethod?.run {
++            val instructions = implementation!!.instructions
++            val parseIndex = instructions.indexOfFirst {
++                it.opcode == Opcode.INVOKE_STATIC && it.getReference<MethodReference>().toString() ==
++                        "Ljava/lang/Float;->parseFloat(Ljava/lang/String;)F"
++            }
++            val moveResult = instructions.getOrNull(parseIndex + 1)
++            if (parseIndex != -1 && moveResult?.opcode == Opcode.MOVE_RESULT) {
++                addInstructions(
++                    parseIndex + 2, """
++                    invoke-static {v${(moveResult as OneRegisterInstruction).registerA}}, Lapp/revanced/bilibili/patches/PlaybackSpeedPatch;->onPlaybackSpeedSelected(F)V
++                """.trimIndent()
++                )
++            }
++        }
+         PlaybackSpeedSettingFingerprint.result.ifEmpty {
+             throw PlaybackSpeedSettingFingerprint.exception
+         }.forEach { r ->
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/quality/fingerprints/PlayerSettingHelperFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/quality/fingerprints/PlayerSettingHelperFingerprint.kt
+index 364d03e..37c28be 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/quality/fingerprints/PlayerSettingHelperFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/quality/fingerprints/PlayerSettingHelperFingerprint.kt
+@@ -6,3 +6,13 @@ object PlayerSettingHelperFingerprint : MethodFingerprint(
+     returnType = "I",
+     strings = listOf("PlayerSettingHelper", "get free data failed")
+ )
++
++/**
++ * Since 8.92.x the default quality getter was moved into an obfuscated singleton
++ * and only logs "quality settings:".
++ */
++object PlayerSettingHelperNewFingerprint : MethodFingerprint(
++    returnType = "I",
++    parameters = listOf(),
++    strings = listOf("PlayerSettingHelper", "quality settings:")
++)
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/quality/patch/VideoQualityPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/quality/patch/VideoQualityPatch.kt
+index a8976ef..1d2f863 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/quality/patch/VideoQualityPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/quality/patch/VideoQualityPatch.kt
+@@ -4,12 +4,14 @@ import app.revanced.patcher.data.BytecodeContext
+ import app.revanced.patcher.extensions.InstructionExtensions.addInstructions
+ import app.revanced.patcher.extensions.InstructionExtensions.addInstructionsWithLabels
+ import app.revanced.patcher.patch.BytecodePatch
++import app.revanced.patcher.patch.PatchException
+ import app.revanced.patcher.patch.annotation.CompatiblePackage
+ import app.revanced.patcher.patch.annotation.Patch
+ import app.revanced.patches.bilibili.utils.cloneMutable
+ import app.revanced.patches.bilibili.video.quality.fingerprints.PlayerSettingHelperFingerprint
++import app.revanced.patches.bilibili.video.quality.fingerprints.PlayerSettingHelperNewFingerprint
+ import app.revanced.util.exception
+-import com.android.tools.smali.dexlib2.iface.Method
++import com.android.tools.smali.dexlib2.AccessFlags
+ 
+ @Patch(
+     name = "Video default quality",
+@@ -20,12 +22,21 @@ import com.android.tools.smali.dexlib2.iface.Method
+         CompatiblePackage(name = "com.bilibili.app.in")
+     ]
+ )
+-object VideoQualityPatch : BytecodePatch(setOf(PlayerSettingHelperFingerprint)) {
++object VideoQualityPatch : BytecodePatch(setOf(PlayerSettingHelperFingerprint, PlayerSettingHelperNewFingerprint)) {
+     override fun execute(context: BytecodeContext) {
+-        var defaultQnMethod: Method? = null
+-        PlayerSettingHelperFingerprint.result?.also {
+-            defaultQnMethod = it.method
+-        }?.mutableMethod?.addInstructionsWithLabels(
++        val result = PlayerSettingHelperFingerprint.result
++            ?: PlayerSettingHelperNewFingerprint.result
++            ?: throw PlayerSettingHelperNewFingerprint.exception
++        val defaultQnMethod = result.method
++        val isStatic = AccessFlags.STATIC.isSet(defaultQnMethod.accessFlags)
++        // Since 8.92.x the getter is an instance method of an obfuscated singleton.
++        val instanceField = if (isStatic) null else result.classDef.fields.firstOrNull {
++            AccessFlags.STATIC.isSet(it.accessFlags) && it.type == result.classDef.type
++        } ?: throw PatchException("not found default quality holder instance")
++        val registerCount = defaultQnMethod.implementation?.registerCount ?: 0
++        if (registerCount - (if (isStatic) 0 else 1) < 1)
++            throw PatchException("default quality method has no free register")
++        result.mutableMethod.addInstructionsWithLabels(
+             0, """
+             invoke-static {}, Lapp/revanced/bilibili/patches/VideoQualityPatch;->getMatchedFullScreenQuality()I
+             move-result v0
+@@ -34,13 +45,21 @@ object VideoQualityPatch : BytecodePatch(setOf(PlayerSettingHelperFingerprint))
+             :jump
+             nop
+         """.trimIndent()
+-        ) ?: throw PlayerSettingHelperFingerprint.exception
++        )
++        val callOrigin = if (instanceField == null) {
++            "invoke-static {}, $defaultQnMethod"
++        } else {
++            """
++            sget-object v0, $instanceField
++            invoke-virtual {v0}, $defaultQnMethod
++            """.trimIndent()
++        }
+         context.findClass("Lapp/revanced/bilibili/patches/VideoQualityPatch;")!!.mutableClass.run {
+             methods.first { it.name == "defaultQn" }.also { methods.remove(it) }
+                 .cloneMutable(registerCount = 1, clearImplementation = true).apply {
+                     addInstructions(
+                         """
+-                        invoke-static {}, $defaultQnMethod
++                        $callOrigin
+                         move-result v0
+                         return v0
+                     """.trimIndent()
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/subtitle/patch/SubtitleImportSavePatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/subtitle/patch/SubtitleImportSavePatch.kt
+index 8457919..aea022f 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/subtitle/patch/SubtitleImportSavePatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/subtitle/patch/SubtitleImportSavePatch.kt
+@@ -117,8 +117,13 @@ object SubtitleImportSavePatch : MultiMethodBytecodePatch(
+         val widgetTokenField = context.classes.first { it.type == absWidgetClass }.fields.first {
+             it.type == widgetTokenClass
+         }.name
+-        val recordSelectedSubtitleMethod = RecordSelectedSubtitleFingerprint.result?.method
+-            ?.name ?: throw RecordSelectedSubtitleFingerprint.exception
++        // Since 8.92.x recordSelectedSubtitle(ZZZ) reads the keys from a config object, so the
++        // fingerprint strings are gone; it is still an unobfuscated interface method though.
++        val recordSelectedSubtitleMethod = RecordSelectedSubtitleFingerprint.result?.method?.name
++            ?: setDmResult.classDef.methods.firstOrNull { m ->
++                m.name == "recordSelectedSubtitle" && m.returnType == "V"
++                        && m.parameterTypes.isNotEmpty() && m.parameterTypes.all { it == "Z" }
++            }?.name ?: throw RecordSelectedSubtitleFingerprint.exception
+         val hookInfoProviderClass = context.findClass(
+             "Lapp/revanced/bilibili/patches/SubtitleImportSavePatch\$HookInfo;"
+         )!!.mutableClass
+diff --git a/patches/src/main/resources/bilibili/host/values/ids.xml b/patches/src/main/resources/bilibili/host/values/ids.xml
+index 666cb8d..7060f5e 100644
+--- a/patches/src/main/resources/bilibili/host/values/ids.xml
++++ b/patches/src/main/resources/bilibili/host/values/ids.xml
+@@ -1,4 +1,5 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+     <item name="biliroaming_menu_item_action_search" type="id" />
++    <item name="biliroaming_video_tools_attached" type="id" />
+ </resources>
+diff --git a/patches/src/main/resources/bilibili/host/values/strings.xml b/patches/src/main/resources/bilibili/host/values/strings.xml
+index e6d2505..36fd8d1 100644
+--- a/patches/src/main/resources/bilibili/host/values/strings.xml
++++ b/patches/src/main/resources/bilibili/host/values/strings.xml
+@@ -495,4 +495,84 @@
+     <string name="biliroaming_old_dm_panel_title">恢复旧版弹幕设置面板</string>
+     <string name="biliroaming_old_dm_panel_summary">目前主要区别在于旧版有弹幕优选，可以过滤更多弹幕</string>
+     <string name="biliroaming_live_no_block_title">屏蔽实名认证弹窗</string>
++
++    <!-- Bilibili-Evolved 移植功能 -->
++    <string name="biliroaming_dynamic_rm_only_fans_all_title">移除全部充电专属动态</string>
++    <string name="biliroaming_dynamic_rm_only_fans_all_summary">包括自己已有权限查看的充电专属动态</string>
++    <string name="biliroaming_dynamic_rm_comment_preview_title">隐藏动态评论预览</string>
++    <string name="biliroaming_dynamic_unfold_title">展开被折叠的动态</string>
++    <string name="biliroaming_dynamic_unfold_summary">自动请求并展开「频繁发布」等被折叠的动态</string>
++    <string name="biliroaming_video_detail_evolved_category_title">Evolved 移植</string>
++    <string name="biliroaming_video_tools_title">哔哩漫游X 工具面板</string>
++    <string name="biliroaming_video_tools_summary">长按视频页的分享按钮打开：查看/保存封面、下载弹幕和音频、保存元数据、BiliPlus、快速收藏、稍后再看、视频快照、逐帧、合集批量收藏</string>
++    <string name="biliroaming_hide_video_share_title">隐藏视频页分享按钮</string>
++    <string name="biliroaming_hide_video_share_summary">隐藏点赞栏里的分享按钮，隐藏后哔哩漫游X工具面板改为长按视频标题打开</string>
++    <string name="biliroaming_hide_bangumi_rating_title">隐藏番剧评分</string>
++    <string name="biliroaming_hide_bangumi_sponsor_title">隐藏番剧承包榜</string>
++    <string name="biliroaming_hide_note_title">隐藏记笔记入口</string>
++    <string name="biliroaming_hide_note_summary">隐藏评论区的记笔记入口</string>
++    <string name="biliroaming_simplify_comment_title">简化评论区</string>
++    <string name="biliroaming_simplify_comment_summary">隐藏IP属地、粉丝勋章、装扮、会员标识等评论区装饰，并可按规则替换评论内容</string>
++    <string name="biliroaming_simplify_comment_location_title">隐藏IP属地</string>
++    <string name="biliroaming_simplify_comment_medal_title">隐藏粉丝勋章</string>
++    <string name="biliroaming_simplify_comment_garb_title">隐藏装扮卡片</string>
++    <string name="biliroaming_simplify_comment_vip_title">隐藏大会员标识</string>
++    <string name="biliroaming_simplify_comment_labels_title">隐藏评论标签</string>
++    <string name="biliroaming_simplify_comment_labels_summary">如「UP主觉得很赞」「热评」等评论上方的标签</string>
++    <string name="biliroaming_hide_avatar_pendant_title">隐藏头像框</string>
++    <string name="biliroaming_hide_avatar_pendant_summary">同时作用于视频页UP主、动态和评论区的头像挂件</string>
++    <string name="biliroaming_comment_replace_rules_title">评论内容替换</string>
++    <string name="biliroaming_comment_replace_rules_summary">每行一条规则，格式：正则表达式=>替换文本</string>
++    <string name="biliroaming_dm_unescape_title">弹幕转义</string>
++    <string name="biliroaming_dm_unescape_summary">把弹幕里的 &amp;amp; &amp;lt; 等HTML实体还原成原字符</string>
++    <string name="biliroaming_dm_merge_title">弹幕合并</string>
++    <string name="biliroaming_dm_merge_summary">合并短时间内内容相同的弹幕，显示为「内容 ×N」</string>
++    <string name="biliroaming_dm_merge_interval_title">弹幕合并时间窗（秒）</string>
++    <string name="biliroaming_search_jump_title">搜索栏跳转</string>
++    <string name="biliroaming_search_jump_summary">在搜索栏输入 av/BV/ss/ep/cv/uid 号时直接打开对应页面</string>
++    <string name="biliroaming_search_jump_number_title">纯数字视为AV号</string>
++    <string name="biliroaming_search_jump_number_summary">输入纯数字时直接打开对应AV号视频</string>
++    <string name="biliroaming_dynamic_follow_group_filter_title">按关注分组筛选动态</string>
++    <string name="biliroaming_dynamic_follow_group_filter_summary">只显示所选关注分组内UP主的动态（分组成员每6小时刷新一次）</string>
++    <string name="biliroaming_dynamic_follow_group_ids_title">选择关注分组</string>
++    <string name="biliroaming_dynamic_follow_group_ids_none">未选择分组（不过滤）</string>
++    <string name="biliroaming_dynamic_follow_group_ids_selected">已选择 %1$d 个分组</string>
++    <string name="biliroaming_live_home_pause_title">直播首页停止自动播放</string>
++    <string name="biliroaming_live_home_pause_summary">直播首页的推荐卡片不再自动播放</string>
++    <string name="biliroaming_expand_video_desc_title">自动展开视频简介</string>
++    <string name="biliroaming_expand_video_desc_summary">进入视频页时自动点开「展开更多」</string>
++    <string name="biliroaming_skip_charge_thanks_title">隐藏充电鸣谢</string>
++    <string name="biliroaming_skip_charge_thanks_summary">移除视频页的充电感谢名单</string>
++    <string name="biliroaming_remember_season_progress_title">记忆合集进度</string>
++    <string name="biliroaming_remember_season_progress_summary">从合集第一集进入时自动跳转到上次观看的那一集</string>
++    <string name="biliroaming_auto_remove_watch_later_title">看完自动移出稍后再看</string>
++    <string name="biliroaming_auto_remove_watch_later_summary">视频播放到结尾（剩余15秒内）时自动从稍后再看中移除</string>
++    <string name="biliroaming_auto_play_same_up_title">连播只播同UP视频</string>
++    <string name="biliroaming_auto_play_same_up_summary">自动连播时只保留当前UP主的推荐视频</string>
++    <string name="biliroaming_auto_play_av_only_title">连播排除非视频内容</string>
++    <string name="biliroaming_auto_play_av_only_summary">自动连播时排除番剧、直播、广告等非普通视频</string>
++    <string name="biliroaming_show_follow_time_title">显示关注时间</string>
++    <string name="biliroaming_show_follow_time_summary">关注列表中显示关注日期（需通过网页接口获取）</string>
++    <string name="biliroaming_custom_font_title">自定义字体</string>
++    <string name="biliroaming_custom_font_summary">开启后选择一个 ttf/otf 字体文件替换应用默认字体，重启生效</string>
++    <string name="biliroaming_custom_font_choose">选择字体文件</string>
++    <string name="biliroaming_night_schedule_title">夜间模式计划时段</string>
++    <string name="biliroaming_night_schedule_summary">在设定时段内自动切换到夜间模式，时段外恢复此前的主题</string>
++    <string name="biliroaming_night_schedule_start_title">夜间模式开始时间（HH:mm）</string>
++    <string name="biliroaming_night_schedule_end_title">夜间模式结束时间（HH:mm）</string>
++    <string name="biliroaming_batch_delete_dynamics_title">批量删除动态</string>
++    <string name="biliroaming_batch_delete_dynamics_summary">列出最近的动态，勾选后批量删除（不可恢复）</string>
++    <string name="biliroaming_remove_ads_title">去广告</string>
++    <string name="biliroaming_remove_ads_summary">开屏、首页、视频页、评论、动态、直播、我的页的广告与推广开关</string>
++    <string name="biliroaming_remove_ads_splash_category">开屏页</string>
++    <string name="biliroaming_remove_ads_home_category">首页</string>
++    <string name="biliroaming_remove_ads_home_filter_title">首页推荐按类型过滤</string>
++    <string name="biliroaming_remove_ads_home_filter_summary">可勾选广告、推广等卡片类型</string>
++    <string name="biliroaming_remove_ads_video_category">视频页</string>
++    <string name="biliroaming_remove_ads_video_relate_title">推荐列表过滤</string>
++    <string name="biliroaming_remove_ads_video_relate_summary">移除视频页推荐列表中的推广内容</string>
++    <string name="biliroaming_remove_ads_comment_category">评论区</string>
++    <string name="biliroaming_remove_ads_dynamic_category">动态</string>
++    <string name="biliroaming_remove_ads_live_category">直播间</string>
++    <string name="biliroaming_remove_ads_mine_category">我的页</string>
+ </resources>
+diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_dynamic.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_dynamic.xml
+index ed951cd..a7d420e 100644
+--- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_dynamic.xml
++++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_dynamic.xml
+@@ -36,20 +36,31 @@
+             android:key="customize_dynamic_rm_blocked"
+             android:summary="@string/biliroaming_dynamic_rm_blocked_summary"
+             android:title="@string/biliroaming_dynamic_rm_blocked_title" />
+-        <androidx.preference.SwitchPreferenceCompat
+-            android:key="customize_dynamic_rm_ad_link"
+-            android:summary="@string/biliroaming_dynamic_rm_ad_link_summary"
+-            android:title="@string/biliroaming_dynamic_rm_ad_link_title" />
+         <androidx.preference.SwitchPreferenceCompat
+             android:key="customize_dynamic_rm_up_reservation"
+             android:title="@string/biliroaming_dynamic_rm_up_reservation_title" />
+-        <androidx.preference.SwitchPreferenceCompat
+-            android:key="dynamic_rm_cm"
+-            android:summary="@string/biliroaming_dynamic_rm_cm_summary"
+-            android:title="@string/biliroaming_dynamic_rm_cm_title" />
+         <androidx.preference.SwitchPreferenceCompat
+             android:key="dynamic_rm_story"
+             android:title="@string/biliroaming_dynamic_rm_story_title" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="dynamic_rm_only_fans_all"
++            android:summary="@string/biliroaming_dynamic_rm_only_fans_all_summary"
++            android:title="@string/biliroaming_dynamic_rm_only_fans_all_title" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="dynamic_rm_comment_preview"
++            android:title="@string/biliroaming_dynamic_rm_comment_preview_title" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="dynamic_unfold"
++            android:summary="@string/biliroaming_dynamic_unfold_summary"
++            android:title="@string/biliroaming_dynamic_unfold_title" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="dynamic_follow_group_filter"
++            android:summary="@string/biliroaming_dynamic_follow_group_filter_summary"
++            android:title="@string/biliroaming_dynamic_follow_group_filter_title" />
++        <androidx.preference.Preference
++            android:dependency="dynamic_follow_group_filter"
++            android:key="dynamic_follow_group_ids"
++            android:title="@string/biliroaming_dynamic_follow_group_ids_title" />
+         <androidx.preference.Preference
+             android:fragment="app.revanced.bilibili.settings.fragments.FilterDynamicByTypeFragment"
+             android:key="filter_dynamic_by_type"
+diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_home.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_home.xml
+index f1fcb77..8038ef9 100644
+--- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_home.xml
++++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_home.xml
+@@ -45,9 +45,6 @@
+         <androidx.preference.SwitchPreferenceCompat
+             android:key="purify_game"
+             android:title="@string/biliroaming_purify_game_title" />
+-        <androidx.preference.SwitchPreferenceCompat
+-            android:key="block_top_activity"
+-            android:title="@string/biliroaming_block_top_activity_title" />
+         <androidx.preference.SwitchPreferenceCompat
+             android:key="drawer"
+             android:summary="@string/biliroaming_drawer_summary"
+diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_live_room.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_live_room.xml
+index c37c0fb..217520b 100644
+--- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_live_room.xml
++++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_live_room.xml
+@@ -31,6 +31,10 @@
+             android:key="disable_auto_float"
+             android:summary="@string/biliroaming_disable_auto_float_summary"
+             android:title="@string/biliroaming_disable_auto_float_title" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="live_home_pause"
++            android:summary="@string/biliroaming_live_home_pause_summary"
++            android:title="@string/biliroaming_live_home_pause_title" />
+         <androidx.preference.SwitchPreferenceCompat
+             android:key="remove_live_watermark"
+             android:summary="@string/biliroaming_remove_live_watermark_summary"
+diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_mine.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_mine.xml
+index ce7dfd6..8fe0503 100644
+--- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_mine.xml
++++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_mine.xml
+@@ -15,12 +15,6 @@
+         <androidx.preference.SwitchPreferenceCompat
+             android:key="purify_drawer_reddot"
+             android:title="@string/biliroaming_purify_drawer_reddot_title" />
+-        <androidx.preference.SwitchPreferenceCompat
+-            android:key="remove_vip_section"
+-            android:title="@string/biliroaming_remove_vip_section_title" />
+-        <androidx.preference.SwitchPreferenceCompat
+-            android:key="block_tips"
+-            android:title="@string/biliroaming_block_tips_title" />
+         <androidx.preference.Preference
+             android:fragment="app.revanced.bilibili.settings.fragments.CustomizeDrawerFragment"
+             android:key="customize_drawer"
+diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_search.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_search.xml
+index a962281..5f6e23b 100644
+--- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_search.xml
++++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_search.xml
+@@ -15,7 +15,7 @@
+             android:key="fragment_purify_search_types"
+             android:title="@string/biliroaming_purify_search_types_title" />
+         <androidx.preference.SwitchPreferenceCompat
+-            android:defaultValue="true"
++            android:defaultValue="false"
+             android:key="limit_search_results_to_five"
+             android:summary="@string/biliroaming_limit_search_results_summary"
+             android:title="@string/biliroaming_limit_search_results_title" />
+@@ -27,5 +27,14 @@
+             android:fragment="app.revanced.bilibili.settings.fragments.FilterSearchKeywordsFragment"
+             android:key="search_keywords"
+             android:title="@string/biliroaming_filter_search_keywords_title" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="search_jump"
++            android:summary="@string/biliroaming_search_jump_summary"
++            android:title="@string/biliroaming_search_jump_title" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:dependency="search_jump"
++            android:key="search_jump_number"
++            android:summary="@string/biliroaming_search_jump_number_summary"
++            android:title="@string/biliroaming_search_jump_number_title" />
+     </androidx.preference.PreferenceCategory>
+ </androidx.preference.PreferenceScreen>
+diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_space.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_space.xml
+index b1c55f6..2a799bc 100644
+--- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_space.xml
++++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_space.xml
+@@ -9,4 +9,13 @@
+         android:entries="@array/biliroaming_space_entries"
+         android:entryValues="@array/biliroaming_space_values"
+         app:migration_settings_type="none" />
++    <androidx.preference.PreferenceCategory
++        android:key="category_space_evolved"
++        android:layout="@layout/bili_app_layout_preference_category_title"
++        android:title="@string/biliroaming_video_detail_evolved_category_title">
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="show_follow_time"
++            android:summary="@string/biliroaming_show_follow_time_summary"
++            android:title="@string/biliroaming_show_follow_time_title" />
++    </androidx.preference.PreferenceCategory>
+ </androidx.preference.PreferenceScreen>
+diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_video_detail.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_video_detail.xml
+index cef2fec..c256aec 100644
+--- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_video_detail.xml
++++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_video_detail.xml
+@@ -38,10 +38,6 @@
+         <androidx.preference.SwitchPreferenceCompat
+             android:key="block_live_order"
+             android:title="@string/biliroaming_block_live_order_title" />
+-        <androidx.preference.SwitchPreferenceCompat
+-            android:key="block_activity_tab"
+-            android:summary="@string/biliroaming_block_activity_tab_summary"
+-            android:title="@string/biliroaming_block_activity_tab_title" />
+         <androidx.preference.SwitchPreferenceCompat
+             android:key="not_lock_orientation"
+             android:summary="@string/biliroaming_not_lock_orientation_summary"
+@@ -106,19 +102,75 @@
+             android:fragment="app.revanced.bilibili.settings.fragments.FilterCommentFragment"
+             android:key="fragment_filter_comment"
+             android:title="@string/biliroaming_filter_comment_title" />
++        <androidx.preference.Preference
++            android:fragment="app.revanced.bilibili.settings.fragments.SimplifyCommentFragment"
++            android:key="fragment_simplify_comment"
++            android:summary="@string/biliroaming_simplify_comment_summary"
++            android:title="@string/biliroaming_simplify_comment_title" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="hide_note"
++            android:summary="@string/biliroaming_hide_note_summary"
++            android:title="@string/biliroaming_hide_note_title" />
+     </androidx.preference.PreferenceCategory>
+     <androidx.preference.PreferenceCategory
+-        android:key="category_video_detail_ad"
++        android:key="category_video_detail_evolved"
+         android:layout="@layout/bili_app_layout_preference_category_title"
+-        android:title="@string/biliroaming_video_detail_ad_category_title">
+-        <androidx.preference.SwitchPreferenceCompat
+-            android:key="block_up_rcmd_ads"
+-            android:summary="@string/biliroaming_block_up_rcmd_ads_summary"
+-            android:title="@string/biliroaming_block_up_rcmd_ads_title" />
+-        <androidx.preference.SwitchPreferenceCompat
+-            android:key="block_bangumi_page_ads"
+-            android:summary="@string/biliroaming_block_bangumi_page_ads_summary"
+-            android:title="@string/biliroaming_block_bangumi_page_ads_title" />
++        android:title="@string/biliroaming_video_detail_evolved_category_title">
++        <androidx.preference.SwitchPreferenceCompat
++            android:defaultValue="true"
++            android:key="video_tools"
++            android:summary="@string/biliroaming_video_tools_summary"
++            android:title="@string/biliroaming_video_tools_title" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="hide_video_share"
++            android:summary="@string/biliroaming_hide_video_share_summary"
++            android:title="@string/biliroaming_hide_video_share_title" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="hide_bangumi_rating"
++            android:title="@string/biliroaming_hide_bangumi_rating_title" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="hide_bangumi_sponsor"
++            android:title="@string/biliroaming_hide_bangumi_sponsor_title" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="dm_unescape"
++            android:summary="@string/biliroaming_dm_unescape_summary"
++            android:title="@string/biliroaming_dm_unescape_title" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="dm_merge"
++            android:summary="@string/biliroaming_dm_merge_summary"
++            android:title="@string/biliroaming_dm_merge_title" />
++        <androidx.preference.SeekBarPreference
++            android:defaultValue="20"
++            android:dependency="dm_merge"
++            android:key="dm_merge_interval"
++            android:max="120"
++            android:title="@string/biliroaming_dm_merge_interval_title"
++            app:min="1"
++            app:showSeekBarValue="true" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="expand_video_desc"
++            android:summary="@string/biliroaming_expand_video_desc_summary"
++            android:title="@string/biliroaming_expand_video_desc_title" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="skip_charge_thanks"
++            android:summary="@string/biliroaming_skip_charge_thanks_summary"
++            android:title="@string/biliroaming_skip_charge_thanks_title" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="remember_season_progress"
++            android:summary="@string/biliroaming_remember_season_progress_summary"
++            android:title="@string/biliroaming_remember_season_progress_title" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="auto_remove_watch_later"
++            android:summary="@string/biliroaming_auto_remove_watch_later_summary"
++            android:title="@string/biliroaming_auto_remove_watch_later_title" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="auto_play_same_up"
++            android:summary="@string/biliroaming_auto_play_same_up_summary"
++            android:title="@string/biliroaming_auto_play_same_up_title" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="auto_play_av_only"
++            android:summary="@string/biliroaming_auto_play_av_only_summary"
++            android:title="@string/biliroaming_auto_play_av_only_title" />
+     </androidx.preference.PreferenceCategory>
+     <androidx.preference.PreferenceCategory
+         android:key="category_video_detail_other"
+diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_filter_comment.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_filter_comment.xml
+index 7ee9668..7af0ac5 100644
+--- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_filter_comment.xml
++++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_filter_comment.xml
+@@ -5,9 +5,6 @@
+         <androidx.preference.SwitchPreferenceCompat
+             android:key="block_comment_only_at"
+             android:title="@string/biliroaming_block_comment_only_at_title" />
+-        <androidx.preference.SwitchPreferenceCompat
+-            android:key="block_comment_goods"
+-            android:title="@string/biliroaming_block_comment_goods_title" />
+         <androidx.preference.Preference
+             android:fragment="app.revanced.bilibili.settings.fragments.FilterCommentByKeywordFragment"
+             android:key="filter_comment_by_keyword"
+diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_misc.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_misc.xml
+index 75de12a..f700a91 100644
+--- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_misc.xml
++++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_misc.xml
+@@ -110,6 +110,34 @@
+             android:title="@string/biliroaming_mini_program_title" />
+     </androidx.preference.PreferenceCategory>
+ 
++    <androidx.preference.PreferenceCategory
++        android:key="category_misc_evolved"
++        android:layout="@layout/bili_app_layout_preference_category_title"
++        android:title="@string/biliroaming_video_detail_evolved_category_title">
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="custom_font"
++            android:summary="@string/biliroaming_custom_font_summary"
++            android:title="@string/biliroaming_custom_font_title" />
++        <androidx.preference.SwitchPreferenceCompat
++            android:key="night_schedule"
++            android:summary="@string/biliroaming_night_schedule_summary"
++            android:title="@string/biliroaming_night_schedule_title" />
++        <androidx.preference.EditTextPreference
++            android:defaultValue="22:00"
++            android:dependency="night_schedule"
++            android:dialogTitle="@string/biliroaming_night_schedule_start_title"
++            android:key="night_schedule_start"
++            android:title="@string/biliroaming_night_schedule_start_title"
++            app:useSimpleSummaryProvider="true" />
++        <androidx.preference.EditTextPreference
++            android:defaultValue="07:00"
++            android:dependency="night_schedule"
++            android:dialogTitle="@string/biliroaming_night_schedule_end_title"
++            android:key="night_schedule_end"
++            android:title="@string/biliroaming_night_schedule_end_title"
++            app:useSimpleSummaryProvider="true" />
++    </androidx.preference.PreferenceCategory>
++
+     <androidx.preference.PreferenceCategory
+         android:key="category_splash"
+         android:layout="@layout/bili_app_layout_preference_category_title"
+@@ -142,13 +170,6 @@
+             android:title="@string/biliroaming_custom_update_title" />
+     </androidx.preference.PreferenceCategory>
+ 
+-    <androidx.preference.PreferenceCategory>
+-        <androidx.preference.SwitchPreferenceCompat
+-            android:key="purify_splash"
+-            android:summary="@string/biliroaming_purify_splash_summary"
+-            android:title="@string/biliroaming_purify_splash_title" />
+-    </androidx.preference.PreferenceCategory>
+-
+     <androidx.preference.PreferenceCategory
+         android:key="category_always_enabled"
+         android:layout="@layout/bili_app_layout_preference_category_title"
+diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_tool.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_tool.xml
+index 166686c..48bbaeb 100644
+--- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_tool.xml
++++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_tool.xml
+@@ -13,5 +13,9 @@
+             android:key="export_cache_video"
+             android:summary="@string/biliroaming_export_cache_video_summary"
+             android:title="@string/biliroaming_export_cache_video_title" />
++        <androidx.preference.Preference
++            android:key="batch_delete_dynamics"
++            android:summary="@string/biliroaming_batch_delete_dynamics_summary"
++            android:title="@string/biliroaming_batch_delete_dynamics_title" />
+     </androidx.preference.PreferenceCategory>
+ </androidx.preference.PreferenceScreen>
+diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_video_detail_filter.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_video_detail_filter.xml
+index c58204b..4e1dedf 100644
+--- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_video_detail_filter.xml
++++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_video_detail_filter.xml
+@@ -4,7 +4,7 @@
+     <androidx.preference.PreferenceCategory>
+         <androidx.preference.SwitchPreferenceCompat
+             android:key="remove_video_relate_nothing"
+-            android:defaultValue="true"
++            android:defaultValue="false"
+             android:disableDependentsState="true"
+             android:summary="@string/biliroaming_rm_video_relate_nothing_summary"
+             android:title="@string/biliroaming_rm_video_relate_nothing_title" />
+diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_settings.xml b/patches/src/main/resources/bilibili/xml/biliroaming_settings.xml
+index eaf34b1..258a0cc 100644
+--- a/patches/src/main/resources/bilibili/xml/biliroaming_settings.xml
++++ b/patches/src/main/resources/bilibili/xml/biliroaming_settings.xml
+@@ -8,6 +8,14 @@
+             android:title="@string/biliroaming_unlock_area_limit_category_title" />
+     </androidx.preference.PreferenceCategory>
+ 
++    <androidx.preference.PreferenceCategory>
++        <androidx.preference.Preference
++            android:fragment="app.revanced.bilibili.settings.fragments.RemoveAdsFragment"
++            android:key="remove_ads"
++            android:summary="@string/biliroaming_remove_ads_summary"
++            android:title="@string/biliroaming_remove_ads_title" />
++    </androidx.preference.PreferenceCategory>
++
+     <androidx.preference.PreferenceCategory>
+         <androidx.preference.Preference
+             android:fragment="app.revanced.bilibili.settings.fragments.CustomizePlayerFragment"
+diff --git a/settings.gradle.kts b/settings.gradle.kts
+index 5b9fdb6..fd9ab9b 100644
+--- a/settings.gradle.kts
++++ b/settings.gradle.kts
+@@ -21,6 +21,13 @@ dependencyResolutionManagement {
+         mavenLocal()
+         google()
+         maven { url = uri("https://jitpack.io") }
++        maven {
++            url = uri("https://maven.pkg.github.com/revanced/registry")
++            credentials {
++                username = gprUser.orNull ?: System.getenv("GITHUB_ACTOR")
++                password = gprKey.orNull ?: System.getenv("GITHUB_TOKEN")
++            }
++        }
+         maven {
+             // A repository must be specified for some reason. "registry" is a dummy.
+             url = uri("https://maven.pkg.github.com/zjns/registry")

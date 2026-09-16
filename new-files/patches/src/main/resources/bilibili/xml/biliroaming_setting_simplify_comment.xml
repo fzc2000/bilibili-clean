@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.preference.PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <androidx.preference.PreferenceCategory>
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="simplify_comment_location"
+            android:title="@string/biliroaming_simplify_comment_location_title" />
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="simplify_comment_medal"
+            android:title="@string/biliroaming_simplify_comment_medal_title" />
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="simplify_comment_garb"
+            android:title="@string/biliroaming_simplify_comment_garb_title" />
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="simplify_comment_vip"
+            android:title="@string/biliroaming_simplify_comment_vip_title" />
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="simplify_comment_labels"
+            android:summary="@string/biliroaming_simplify_comment_labels_summary"
+            android:title="@string/biliroaming_simplify_comment_labels_title" />
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="hide_avatar_pendant"
+            android:summary="@string/biliroaming_hide_avatar_pendant_summary"
+            android:title="@string/biliroaming_hide_avatar_pendant_title" />
+        <androidx.preference.EditTextPreference
+            android:key="comment_replace_rules"
+            android:dialogTitle="@string/biliroaming_comment_replace_rules_title"
+            android:summary="@string/biliroaming_comment_replace_rules_summary"
+            android:title="@string/biliroaming_comment_replace_rules_title" />
+    </androidx.preference.PreferenceCategory>
+</androidx.preference.PreferenceScreen>

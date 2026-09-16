@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.preference.PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <androidx.preference.PreferenceCategory
+        android:key="category_ads_splash"
+        android:layout="@layout/bili_app_layout_preference_category_title"
+        android:title="@string/biliroaming_remove_ads_splash_category">
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="purify_splash"
+            android:summary="@string/biliroaming_purify_splash_summary"
+            android:title="@string/biliroaming_purify_splash_title" />
+    </androidx.preference.PreferenceCategory>
+    <androidx.preference.PreferenceCategory
+        android:key="category_ads_home"
+        android:layout="@layout/bili_app_layout_preference_category_title"
+        android:title="@string/biliroaming_remove_ads_home_category">
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="block_top_activity"
+            android:title="@string/biliroaming_block_top_activity_title" />
+        <androidx.preference.Preference
+            android:fragment="app.revanced.bilibili.settings.fragments.FilterHomeRcmdByTypeFragment"
+            android:key="ads_filter_home_by_type"
+            android:summary="@string/biliroaming_remove_ads_home_filter_summary"
+            android:title="@string/biliroaming_remove_ads_home_filter_title" />
+    </androidx.preference.PreferenceCategory>
+    <androidx.preference.PreferenceCategory
+        android:key="category_ads_video"
+        android:layout="@layout/bili_app_layout_preference_category_title"
+        android:title="@string/biliroaming_remove_ads_video_category">
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="block_up_rcmd_ads"
+            android:summary="@string/biliroaming_block_up_rcmd_ads_summary"
+            android:title="@string/biliroaming_block_up_rcmd_ads_title" />
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="block_bangumi_page_ads"
+            android:summary="@string/biliroaming_block_bangumi_page_ads_summary"
+            android:title="@string/biliroaming_block_bangumi_page_ads_title" />
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="block_activity_tab"
+            android:summary="@string/biliroaming_block_activity_tab_summary"
+            android:title="@string/biliroaming_block_activity_tab_title" />
+        <androidx.preference.Preference
+            android:fragment="app.revanced.bilibili.settings.fragments.RemoveVideoPopupsFragment"
+            android:key="ads_remove_video_popups"
+            android:title="@string/biliroaming_remove_video_popups_title" />
+        <androidx.preference.Preference
+            android:fragment="app.revanced.bilibili.settings.fragments.VideoDetailFilterFragment"
+            android:key="ads_video_relate_filter"
+            android:summary="@string/biliroaming_remove_ads_video_relate_summary"
+            android:title="@string/biliroaming_remove_ads_video_relate_title" />
+    </androidx.preference.PreferenceCategory>
+    <androidx.preference.PreferenceCategory
+        android:key="category_ads_comment"
+        android:layout="@layout/bili_app_layout_preference_category_title"
+        android:title="@string/biliroaming_remove_ads_comment_category">
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="block_comment_goods"
+            android:title="@string/biliroaming_block_comment_goods_title" />
+    </androidx.preference.PreferenceCategory>
+    <androidx.preference.PreferenceCategory
+        android:key="category_ads_dynamic"
+        android:layout="@layout/bili_app_layout_preference_category_title"
+        android:title="@string/biliroaming_remove_ads_dynamic_category">
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="customize_dynamic_rm_ad_link"
+            android:summary="@string/biliroaming_dynamic_rm_ad_link_summary"
+            android:title="@string/biliroaming_dynamic_rm_ad_link_title" />
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="dynamic_rm_cm"
+            android:summary="@string/biliroaming_dynamic_rm_cm_summary"
+            android:title="@string/biliroaming_dynamic_rm_cm_title" />
+    </androidx.preference.PreferenceCategory>
+    <androidx.preference.PreferenceCategory
+        android:key="category_ads_live"
+        android:layout="@layout/bili_app_layout_preference_category_title"
+        android:title="@string/biliroaming_remove_ads_live_category">
+        <androidx.preference.Preference
+            android:fragment="app.revanced.bilibili.settings.fragments.PurifyLivePopupsFragment"
+            android:key="ads_purify_live_popups"
+            android:title="@string/biliroaming_purify_live_popups_title" />
+    </androidx.preference.PreferenceCategory>
+    <androidx.preference.PreferenceCategory
+        android:key="category_ads_mine"
+        android:layout="@layout/bili_app_layout_preference_category_title"
+        android:title="@string/biliroaming_remove_ads_mine_category">
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="remove_vip_section"
+            android:title="@string/biliroaming_remove_vip_section_title" />
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="block_tips"
+            android:title="@string/biliroaming_block_tips_title" />
+    </androidx.preference.PreferenceCategory>
+</androidx.preference.PreferenceScreen>
