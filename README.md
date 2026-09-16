@@ -10,6 +10,8 @@
 
 > ✨ 基于 BiliRoamingX 二次开发 — 去广告，以及从 Evolved 搬来的实用功能
 
+📝 **[下载发布版本](https://github.com/fzc2000/bilibili-clean/releases)** | 📋 **[验证报告](./VERIFY_REPORT.md)** | 🔧 **[自己编译](#自己编)** | 🧩 **[上游 BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX)**
+
 _我只是想安安静静看个视频._
 
 </div>
@@ -44,6 +46,16 @@ _我只是想安安静静看个视频._
 - 🌙 夜间模式定时
 
 > 以上均已在真机上验证，结论见 [VERIFY_REPORT.md](./VERIFY_REPORT.md)
+
+## 截图
+
+| 直播 tab：顶部横幅老实待着 | 去广告：开关全在一页 | 工具：批量删除动态 |
+|:-:|:-:|:-:|
+| ![直播 tab](docs/screenshots/live_tab.png) | ![去广告](docs/screenshots/remove_ads.png) | ![工具](docs/screenshots/tools.png) |
+
+| 漫游设置：新加的「去广告」分类 |
+|:-:|
+| ![漫游设置](docs/screenshots/roaming_home.png) |
 
 ## 快速开始
 
@@ -92,6 +104,11 @@ GITHUB_ACTOR=你的用户名 GITHUB_TOKEN=你的令牌 ../build-and-patch.sh
 - 记忆合集进度只认「整个合集的第 1 集」，分季合集从某一季的第 1 集进不会跳转
 - 批量删除动态的「删」没真跑过——我号上没什么可删的
 - 两个测试项因账号未关注相关 UP 主，只验到入口，详见报告
+
+## 贡献者
+
+- [@fzc2000](https://github.com/fzc2000) — 提需求、真机测、拍板
+- Claude（Anthropic）— 定位失效补丁、写代码、搭测试脚本
 
 ## Thanks
 
