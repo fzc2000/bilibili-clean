@@ -106,9 +106,9 @@ GITHUB_ACTOR=你的用户名 GITHUB_TOKEN=你的令牌 ../build-and-patch.sh
 ## Thanks
 
 
-- [BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX) — 补丁框架和大部分去广告能力
-- [Bilibili-Evolved](https://github.com/the1812/Bilibili-Evolved) — 功能思路的来源
-- [ReVanced](https://github.com/ReVanced) — 打补丁的工具链
+- [BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX) 
+- [Bilibili-Evolved](https://github.com/the1812/Bilibili-Evolved) 
+- [ReVanced](https://github.com/ReVanced) 
 
 ## License
 
