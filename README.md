@@ -1,57 +1,74 @@
 <div align="center">
 
+<img src="https://img.shields.io/badge/B%E7%AB%99-8.92.1-00A1D6?style=for-the-badge&logo=bilibili&logoColor=white" alt="Bilibili 8.92.1" />
+
 # bili-adfree-build
 
-_一个没有广告的 B 站，顺便塞了点 Evolved 的功能_
+[![Release](https://img.shields.io/github/v/release/fzc2000/bili-adfree-build?style=flat-square&label=最新版本&color=brightgreen)](https://github.com/fzc2000/bili-adfree-build/releases)
+[![Upstream](https://img.shields.io/badge/上游-BiliRoamingX%4058aaf27-blue?style=flat-square)](https://github.com/BiliRoamingX/BiliRoamingX/tree/58aaf27)
+[![Verify](https://img.shields.io/badge/真机验证-passed-success?style=flat-square)](./VERIFY_REPORT.md)
 
-> 看视频就看视频，别给我推东西.
+> ✨ 基于 BiliRoamingX 的个人补丁包 — 去广告，加上从 Evolved 搬来的实用功能
+
+_我只是想安安静静看个视频._
+
+📦 **[下载 APK](https://github.com/fzc2000/bili-adfree-build/releases)** | 📋 **[验证报告](./VERIFY_REPORT.md)** | 🔧 **[自己编译](#自己编)**
 
 </div>
 
 ---
 
-## 这是什么
+## 为什么做这个
 
-- 拿 [BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX) 自己编的 B 站安卓客户端补丁包
-- 只对 **8.92.1** 这一个版本，别的版本别试，指纹对不上
-- 官方去广告之外，把 [Bilibili-Evolved](https://github.com/the1812/Bilibili-Evolved) 上我常用的几个功能搬到了手机上
+B 站移动端的广告越来越离谱——开屏 5 秒广告、信息流里塞推广、直播间一进去就自动播。[BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX) 解决了大部分，但我在网页端用 [Bilibili-Evolved](https://github.com/the1812/Bilibili-Evolved) 养成的习惯——记住合集进度、批量清动态——手机上没有。
 
-## 干了啥
+所以自己加了几个功能编了个包，既然都编了就放出来，万一有人也想要呢。
 
-- **去广告归拢**
-  - 散落在各页的去广告开关收成一个「去广告」分类，一眼能找到
-  - 开屏品牌广告在 HTTP 层拦掉，8.92.1 这块走 Gson，老补丁看不见
-- **直播首页不自动播**
-  - 卡片列表和顶部大横幅都拦了，自己点还是能播的
-- **批量删除动态**
-  - 网页接口会 412，改走 App 自己的 gRPC
-- **记忆合集进度**
-  - 看到第几集记着，下次从第 1 集点进来直接跳过去
-- **杂七杂八**
-  - 按关注分组筛动态、显示关注时间、看完自动移出稍后再看、自动播同 UP 的视频、跳过充电鸣谢、自动展开简介、自定义字体、夜间模式定时
+## 特性
 
-七项功能在真机上过了一遍，结论在 [VERIFY_REPORT.md](./VERIFY_REPORT.md)。
+### 广告与体验
 
-## 怎么用
+- 🧹 **去广告归拢** — 散落各页面的开关收进一个分类，一眼找到；8.92.1 开屏品牌广告走 Gson，老补丁看不见，HTTP 层直接拦
+- 🔇 **直播首页不自动播** — 进 tab 不会被突然冒出来的声音吓到，想看自己点
 
-去 [Release](../../releases) 下 APK 装上就行。
+### 效率工具
 
-> 签名和官方不一样，装之前先卸了官方版。以后升级只认这里发的包，签名一致才能覆盖装。
+- 🗑️ **批量删除动态** — 网页端删除接口经常 412，改走 App 的 gRPC
+- 📑 **记忆合集进度** — 追番看到第几集会记着，下次从第 1 集进去自动跳到上次位置
 
-## 仓库里有啥
+### 日常增强
 
-| 文件 | 干嘛的 |
-|---|---|
-| `local-changes.diff` | 对 BiliRoamingX 上游（`58aaf27`）已有文件的改动 |
-| `new-files/` | 新加的文件，目录结构和上游仓库一样，整个盖上去就行 |
-| `build-and-patch.sh` | 编译 → 打补丁 → 签名，路径自己改 |
-| `VERIFY_REPORT.md` | 真机验证结论 |
+- 📂 按关注分组筛动态
+- ⏱️ 显示关注时间
+- ✅ 看完自动移出「稍后再看」
+- ▶️ 连续播放同 UP 视频
+- ⏭️ 跳过充电鸣谢
+- 📖 自动展开简介
+- 🔤 自定义字体
+- 🌙 夜间模式定时
 
-keystore 不在这，别找了。
+> 以上均已在真机上验证，结论见 [VERIFY_REPORT.md](./VERIFY_REPORT.md)
+
+## 快速开始
+
+前往 **[Release](../../releases)** 下载最新 APK 安装即可。
+
+> [!IMPORTANT]
+> 签名和官方不一样，**安装前需要先卸载官方版**。之后升级只认这里发的包，签名一致才能覆盖安装。
 
 ## 自己编
 
-要 JDK 21、Android SDK（带 NDK 和 cmake），还有一个能读 BiliRoamingX GitHub Packages 的令牌。
+<details>
+<summary>📝 展开编译指南</summary>
+
+#### 前置条件
+
+- JDK 21
+- Android SDK（带 NDK 和 cmake）
+- 能读 BiliRoamingX GitHub Packages 的令牌
+- 官方 B 站 8.92.1 APK（自己找，这里不放）
+
+#### 步骤
 
 ```bash
 git clone https://github.com/BiliRoamingX/BiliRoamingX.git
@@ -61,23 +78,35 @@ cp -R ../new-files/. .
 GITHUB_ACTOR=你的用户名 GITHUB_TOKEN=你的令牌 ../build-and-patch.sh
 ```
 
-官方 8.92.1 的 APK 自己找，这里不放。
+#### 仓库文件
+
+| 文件 | 说明 |
+|---|---|
+| `local-changes.diff` | 对上游 `58aaf27` 已有文件的改动 |
+| `new-files/` | 新加的文件，目录结构跟上游一致，整个覆盖过去 |
+| `build-and-patch.sh` | 编译 → 打补丁 → 签名一条龙 |
+| `VERIFY_REPORT.md` | 真机验证结论 |
+
+> keystore 不在仓库里，别翻了。
+
+</details>
 
 ## 已知问题
 
-- 记忆合集进度只认「整个合集的第 1 集」，分季合集里某一季的第 1 集不算
-- 批量删除动态的「删」这一步没实测过，我号上没动态可删
-- 两个测试项因为账号没关注只验到入口，见报告
+- 记忆合集进度只认「整个合集的第 1 集」，分季合集从某一季的第 1 集进不会跳转
+- 批量删除动态的「删」没真跑过——我号上没什么可删的
+- 两个测试项因账号未关注相关 UP 主，只验到入口，详见报告
 
 ## Thanks
 
-- [BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX) 底子全是它的
-- [ReVanced](https://github.com/ReVanced) 打补丁的工具链
-- [Bilibili-Evolved](https://github.com/the1812/Bilibili-Evolved) 功能都是照着它抄的
+底子全是别人的，我只是站在上面加了点东西：
+
+- [BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX) — 补丁框架和大部分去广告能力
+- [Bilibili-Evolved](https://github.com/the1812/Bilibili-Evolved) — 功能思路的来源
+- [ReVanced](https://github.com/ReVanced) — 打补丁的工具链
 
 ---
 
-## 声明
-
-自己用的，图个清净。B 站客户端的一切权利归 B 站，这里不分发官方 APK，也不对你用了之后发生的任何事负责。
-拿去干别的、封号、丢数据，都是你自己的事。
+<div align="center">
+<sub>自用项目，图个清净。B 站客户端的一切权利归 B 站。不分发官方 APK，不对使用后果负责。</sub>
+</div>
