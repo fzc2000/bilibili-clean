@@ -11,7 +11,7 @@
 
 > ✨ 基于 BiliRoamingX 二次开发 — 去广告，以及从 Evolved 搬来的实用功能
 
-📝 **[下载发布版本](https://github.com/fzc2000/bilibili-clean/releases)** | ❤️ **[赞助](./SPONSOR.md)** | 🧩 **[BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX)**
+📝 **[下载发布版本](https://github.com/fzc2000/bilibili-clean/releases)** | 🧩 **[BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX)**
 
 _我只是想安安静静看个视频._
 
@@ -21,14 +21,14 @@ _我只是想安安静静看个视频._
 
 ## 为什么做这个
 
-因为我受不了开屏广告，虽然我知道这是B站的很大一部分收益来源。但 这和我又有什么关系呢？
+因为我受不了开屏广告，而且普通用户安装BiliRoamingX并不简单
 
 ## 特性
 
-### 广告与体验
+### 改动
 
-- 🧹 **去广告归拢** — 散落各页面的开关收进一个分类，一眼找到；8.92.1 开屏品牌广告走 Gson，老补丁看不见，HTTP 层直接拦
-- 🔇 **直播首页不自动播** — 进 tab 不会被突然冒出来的声音吓到，想看自己点
+-  **去广告** — 散落各页面的开关收进一个分类，一眼找到；8.92.1 开屏品牌广告走 Gson，老补丁看不见，HTTP 层直接拦
+-  **直播首页不自动播** — 进 tab 不会被突然冒出来的声音吓到，想看自己点
 
 ### 效率工具
 
@@ -37,18 +37,16 @@ _我只是想安安静静看个视频._
 
 ### 日常增强
 
-- 📂 按关注分组筛动态
-- ⏱️ 显示关注时间
-- ✅ 看完自动移出「稍后再看」
-- ▶️ 连续播放同 UP 视频
-- ⏭️ 跳过充电鸣谢
-- 📖 自动展开简介
-- 🔤 自定义字体
-- 🌙 夜间模式定时
+-  按关注分组筛动态
+-  显示关注时间
+-  看完自动移出「稍后再看」
+-  连续播放同 UP 视频
+-  跳过充电鸣谢
+-  自动展开简介
+-  自定义字体
+-  夜间模式定时
 
-> 以上均已在真机上验证，结论见 [VERIFY_REPORT.md](./VERIFY_REPORT.md)
 
-## 截图
 
 | 直播 | 去广告 | 漫游设置 |
 |:-:|:-:|:-:|
@@ -102,14 +100,12 @@ GITHUB_ACTOR=你的用户名 GITHUB_TOKEN=你的令牌 ../build-and-patch.sh
 - 批量删除动态的「删」没真跑过——我号上没什么可删的
 - 两个测试项因账号未关注相关 UP 主，只验到入口，详见报告
 
-## 贡献者
+## 联系我们
 
-- [@fzc2000](https://github.com/fzc2000) — 提需求、真机测、拍板
-- Claude（Anthropic）— 定位失效补丁、写代码、搭测试脚本
+- [Telegram](t.me/chenmo114514) 
 
 ## Thanks
 
-底子全是别人的，我只是站在上面加了点东西：
 
 - [BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX) — 补丁框架和大部分去广告能力
 - [Bilibili-Evolved](https://github.com/the1812/Bilibili-Evolved) — 功能思路的来源
@@ -118,8 +114,6 @@ GITHUB_ACTOR=你的用户名 GITHUB_TOKEN=你的令牌 ../build-and-patch.sh
 ## License
 
 本项目基于 [BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX)（GPL-3.0）二次开发，同样采用 **[GPL-3.0](./LICENSE)**。
-
-拿去改、拿去发都行，但改完也得开源，别闭源拿去卖。
 
 ---
 
