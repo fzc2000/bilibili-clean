@@ -21,6 +21,9 @@ object LiveInlinePlayManagerPlayFingerprint : MethodFingerprint(
 
 /**
  * BaseVideoBannerHolder#realStartPlay(manual): starts inline playback for the live home top big banner.
+ *
+ * 仅存在于 9.12.0 之前的版本。9.12.0 起该 holder 被重写，banner 的自动播放统一由
+ * LiveInlinePlayManager（见上）发起，所以该指纹在新版解析不到属正常情况，按可选处理。
  */
 object LiveBannerRealStartPlayFingerprint : MethodFingerprint(
     returnType = "Z",
@@ -56,23 +59,27 @@ object LiveHomeAutoPlayPatch : BytecodePatch(
         """.trimIndent()
         )
 
+        // 9.12.0 起直播首页顶部 banner 自身的 realStartPlay(manual) 已被删除，
+        // banner 的自动播放改为统一走 LiveInlinePlayManager（上面那个 hook）触发，
+        // 因此这里按可选处理：命中就打，没命中就跳过，不再让整条补丁失败。
         val bannerResult = LiveBannerRealStartPlayFingerprint.result
-            ?: throw LiveBannerRealStartPlayFingerprint.exception
-        val parameterRegisterCount = 2 // this + boolean z
-        val registerCount = bannerResult.method.implementation?.registerCount ?: 0
-        if (registerCount <= parameterRegisterCount)
-            throw PatchException("live banner realStartPlay method has no free register")
-        bannerResult.mutableMethod.addInstructionsWithLabels(
-            0, """
-            invoke-static {}, Lapp/revanced/bilibili/patches/LiveRoomPatch;->disableLiveHomeAutoPlay()Z
-            move-result v0
-            if-eqz v0, :jump_banner
-            if-nez p1, :jump_banner
-            const/4 v0, 0x0
-            return v0
-            :jump_banner
-            nop
-        """.trimIndent()
-        )
+        if (bannerResult != null) {
+            val parameterRegisterCount = 2 // this + boolean z
+            val registerCount = bannerResult.method.implementation?.registerCount ?: 0
+            if (registerCount <= parameterRegisterCount)
+                throw PatchException("live banner realStartPlay method has no free register")
+            bannerResult.mutableMethod.addInstructionsWithLabels(
+                0, """
+                invoke-static {}, Lapp/revanced/bilibili/patches/LiveRoomPatch;->disableLiveHomeAutoPlay()Z
+                move-result v0
+                if-eqz v0, :jump_banner
+                if-nez p1, :jump_banner
+                const/4 v0, 0x0
+                return v0
+                :jump_banner
+                nop
+            """.trimIndent()
+            )
+        }
     }
 }

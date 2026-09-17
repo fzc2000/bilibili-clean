@@ -1,5 +1,5 @@
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/AutoLikePatch.java b/integrations/app/src/main/java/app/revanced/bilibili/patches/AutoLikePatch.java
-index 5370309..3fbd356 100644
+index 53703099..3fbd356c 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/AutoLikePatch.java
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/AutoLikePatch.java
 @@ -23,6 +23,9 @@ public class AutoLikePatch {
@@ -50,7 +50,7 @@ index 5370309..3fbd356 100644
 +    }
  }
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/BLRoutePatch.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/BLRoutePatch.kt
-index 0a98d2c..3ebb8af 100644
+index 0a98d2c8..3ebb8af5 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/BLRoutePatch.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/BLRoutePatch.kt
 @@ -19,6 +19,20 @@ object BLRoutePatch {
@@ -75,7 +75,7 @@ index 0a98d2c..3ebb8af 100644
      @JvmStatic
      fun intercept(uri: Uri?): Uri? {
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/CacheRedirectPatch.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/CacheRedirectPatch.kt
-index a90fdaf..94d0520 100644
+index a90fdafb..94d05204 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/CacheRedirectPatch.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/CacheRedirectPatch.kt
 @@ -94,6 +94,24 @@ object CacheRedirectPatch {
@@ -104,7 +104,7 @@ index a90fdaf..94d0520 100644
          context: Context,
          videoUrl: String,
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/CommentImagePatch.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/CommentImagePatch.kt
-index 376e9b7..a699697 100644
+index 376e9b77..a6996970 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/CommentImagePatch.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/CommentImagePatch.kt
 @@ -1,5 +1,6 @@
@@ -170,8 +170,62 @@ index 376e9b7..a699697 100644
          val imageViewerModelClass = runCatchingOrNull {
              Class.forName("com.bilibili.lib.imageviewer.ImageViewerModel")
          } ?: return
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/DarkSwitchPatch.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/DarkSwitchPatch.kt
+index 8de03442..ba4cce5b 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/DarkSwitchPatch.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/DarkSwitchPatch.kt
+@@ -1,6 +1,7 @@
+ package app.revanced.bilibili.patches
+ 
+ import android.app.AlertDialog
++import android.view.View
+ import androidx.annotation.Keep
+ import androidx.fragment.app.Fragment
+ import app.revanced.bilibili.settings.Settings
+@@ -9,6 +10,7 @@ import app.revanced.bilibili.utils.constraintSize
+ import app.revanced.bilibili.widget.OnSwitchDarkModeOriginListener
+ 
+ object DarkSwitchPatch {
++    /** HD 包：切换逻辑仍是独立方法，走原来的「桥接 + 回调原方法」路子 */
+     @Keep
+     @JvmStatic
+     fun switchDarkMode(listener: OnSwitchDarkModeOriginListener, report: Boolean) {
+@@ -29,4 +31,33 @@ object DarkSwitchPatch {
+             listener.switchDarkMode_Origin(report)
+         }
+     }
++
++    /**
++     * 手机包 9.12.0 起：切换逻辑被 R8 内联进 HomeUserCenterFragment#onClick(View)，没有独立方法可改名，
++     * 于是改成在深色分支入口拦截。返回 true 表示本次点击就此中止（弹框已弹出）；
++     * 用户点确定后置一次性放行标记再 performClick 同一个 View，第二趟直接放行走原逻辑。
++     */
++    private var confirmed = false
++
++    @Keep
++    @JvmStatic
++    fun interceptDarkSwitch(fragment: Any, view: View?): Boolean {
++        if (confirmed) {
++            confirmed = false
++            return false
++        }
++        if (!Settings.SwitchDarkTipsDialog()) return false
++        if (!Utils.isNightFollowSystem()) return false
++        val context = (fragment as? Fragment)?.context ?: return false
++        if (view == null) return false
++        AlertDialog.Builder(context)
++            .setMessage(Utils.getString("biliroaming_switch_dark_tips"))
++            .setPositiveButton(android.R.string.ok) { _, _ ->
++                confirmed = true
++                runCatching { view.performClick() }.onFailure { confirmed = false }
++            }
++            .setNegativeButton(android.R.string.cancel, null)
++            .create().constraintSize().show()
++        return true
++    }
+ }
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/LiveRoomPatch.java b/integrations/app/src/main/java/app/revanced/bilibili/patches/LiveRoomPatch.java
-index 02b2424..7d6258a 100644
+index 02b2424a..7d6258a5 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/LiveRoomPatch.java
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/LiveRoomPatch.java
 @@ -41,4 +41,8 @@ public class LiveRoomPatch {
@@ -184,7 +238,7 @@ index 02b2424..7d6258a 100644
 +    }
  }
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/SubtitleImportSavePatch.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/SubtitleImportSavePatch.kt
-index 335af3c..21e5c00 100644
+index 335af3c2..21e5c000 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/SubtitleImportSavePatch.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/SubtitleImportSavePatch.kt
 @@ -110,7 +110,7 @@ object SubtitleImportSavePatch {
@@ -214,7 +268,7 @@ index 335af3c..21e5c00 100644
          @Keep
          @JvmStatic
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/main/ApplicationDelegate.java b/integrations/app/src/main/java/app/revanced/bilibili/patches/main/ApplicationDelegate.java
-index 49d02aa..a68c6d6 100644
+index 49d02aa0..a68c6d64 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/main/ApplicationDelegate.java
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/main/ApplicationDelegate.java
 @@ -53,6 +53,8 @@ import java.util.Objects;
@@ -254,7 +308,7 @@ index 49d02aa..a68c6d6 100644
                  VideoInfoHolder.clearCache();
              else if (activity instanceof MediaViewerActivity) {
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/OkHttpPatch.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/OkHttpPatch.kt
-index 7422574..94bb226 100644
+index 74225749..94bb2268 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/OkHttpPatch.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/OkHttpPatch.kt
 @@ -23,6 +23,7 @@ object OkHttpPatch {
@@ -294,7 +348,7 @@ index 7422574..94bb226 100644
              Logger.debug { "OkHttpPatch.hook, code: $code, url: ${url.safeContent}" }
              Logger.debug { "OkHttpPatch.hook, request, encoding: $reqEncoding, content: ${request.safeContent}" }
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/hooks/HistoryReport.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/hooks/HistoryReport.kt
-index 101596f..68d7cd3 100644
+index 101596f3..68d7cd37 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/hooks/HistoryReport.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/hooks/HistoryReport.kt
 @@ -1,24 +1,69 @@
@@ -374,7 +428,7 @@ index 101596f..68d7cd3 100644
 +    }
  }
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/hooks/Season.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/hooks/Season.kt
-index d11b08c..d8a780a 100644
+index d11b08cb..d8a780a4 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/hooks/Season.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/okhttp/hooks/Season.kt
 @@ -4,6 +4,8 @@ import app.revanced.bilibili.meta.VideoInfo
@@ -407,7 +461,7 @@ index d11b08c..d8a780a 100644
              videoInfo?.apply { view = newResponse } ?: VideoInfo(0, newResponse)
          }
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/ViewUniteReplyHook.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/ViewUniteReplyHook.kt
-index 18d88c9..bdecf31 100644
+index 18d88c96..bdecf310 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/ViewUniteReplyHook.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/ViewUniteReplyHook.kt
 @@ -46,6 +46,8 @@ object ViewUniteReplyHook {
@@ -451,7 +505,7 @@ index 18d88c9..bdecf31 100644
                  }
                  toRemoveIndexes.asReversed().forEach {
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DmSegMobile.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DmSegMobile.kt
-index 752a62e..652834b 100644
+index 752a62eb..652834b1 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DmSegMobile.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DmSegMobile.kt
 @@ -48,6 +48,64 @@ object DmSegMobile : MossHook<DmSegMobileReq, DmSegMobileReply>() {
@@ -520,7 +574,7 @@ index 752a62e..652834b 100644
 +    }
  }
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynAll.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynAll.kt
-index 0a76f46..4b40dc6 100644
+index 0a76f463..4b40dc64 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynAll.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynAll.kt
 @@ -22,6 +22,7 @@ object DynAll : DynListBase<DynAllReq, DynAllReply>() {
@@ -532,7 +586,7 @@ index 0a76f46..4b40dc6 100644
          return super.hookAfter(req, reply, error)
      }
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynListBase.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynListBase.kt
-index f797dd0..271a67d 100644
+index f797dd09..271a67d5 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynListBase.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynListBase.kt
 @@ -3,7 +3,12 @@ package app.revanced.bilibili.patches.protobuf.hooks
@@ -658,7 +712,7 @@ index f797dd0..271a67d 100644
          val forwardItem = modulesList.find { it.hasModuleDynamic() }?.moduleDynamic
              ?.takeIf { it.hasDynForward() }?.dynForward?.item
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynVideo.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynVideo.kt
-index a3895a2..b552bbc 100644
+index a3895a2d..b552bbce 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynVideo.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/DynVideo.kt
 @@ -22,6 +22,7 @@ object DynVideo : DynListBase<DynVideoReq, DynVideoReply>() {
@@ -670,7 +724,7 @@ index a3895a2..b552bbc 100644
      }
  }
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/PlayURLPlayViewUnite.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/PlayURLPlayViewUnite.kt
-index 63c7b32..1acfae5 100644
+index 63c7b326..1acfae57 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/PlayURLPlayViewUnite.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/PlayURLPlayViewUnite.kt
 @@ -6,10 +6,18 @@ import app.revanced.bilibili.patches.protobuf.BangumiPlayUrlHook
@@ -702,7 +756,7 @@ index 63c7b32..1acfae5 100644
          return newReply
      }
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyDetailList.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyDetailList.kt
-index a7b6dde..1ace6fb 100644
+index a7b6dde5..1ace6fb4 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyDetailList.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyDetailList.kt
 @@ -19,8 +19,10 @@ object ReplyDetailList : ReplyListBase<DetailListReq, DetailListReply>() {
@@ -718,7 +772,7 @@ index a7b6dde..1ace6fb 100644
              reply.root.unlockGif(scale = false)
          return super.hookAfter(req, reply, error)
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyListBase.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyListBase.kt
-index 54d5474..af806c9 100644
+index 54d54742..af806c9e 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyListBase.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyListBase.kt
 @@ -80,6 +80,86 @@ abstract class ReplyListBase<out Req : GeneratedMessageLite<*, *>, out Resp : Ge
@@ -809,7 +863,7 @@ index 54d5474..af806c9 100644
          content.apply {
              pictureScale = if (scale) 1.5 else 1.0
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyMainList.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyMainList.kt
-index 2052187..eb5fefa 100644
+index 2052187f..eb5fefaf 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyMainList.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ReplyMainList.kt
 @@ -53,9 +53,21 @@ object ReplyMainList : ReplyListBase<MainListReq, MainListReply>() {
@@ -835,7 +889,7 @@ index 2052187..eb5fefa 100644
          reply.upTop.unlockGif()
          reply.adminTop.unlockGif()
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/SearchAll.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/SearchAll.kt
-index 49f3624..1f7327e 100644
+index 49f36243..1f7327ef 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/SearchAll.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/SearchAll.kt
 @@ -1,9 +1,14 @@
@@ -897,7 +951,7 @@ index 49f3624..1f7327e 100644
          req: SearchAllRequest,
          reply: SearchAllResponse?,
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ViewContinuousPlay.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ViewContinuousPlay.kt
-index fee88d6..06ca1b4 100644
+index fee88d68..06ca1b43 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ViewContinuousPlay.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ViewContinuousPlay.kt
 @@ -1,9 +1,11 @@
@@ -937,7 +991,7 @@ index fee88d6..06ca1b4 100644
 +    }
  }
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ViewUnite.kt b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ViewUnite.kt
-index c28753b..b0dfd43 100644
+index c28753be..b0dfd43d 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ViewUnite.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/protobuf/hooks/ViewUnite.kt
 @@ -1,6 +1,8 @@
@@ -959,7 +1013,7 @@ index c28753b..b0dfd43 100644
          return newReply
      }
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/settings/Settings.kt b/integrations/app/src/main/java/app/revanced/bilibili/settings/Settings.kt
-index e720d5f..d7e28e9 100644
+index e720d5f8..d7e28e93 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/settings/Settings.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/settings/Settings.kt
 @@ -110,6 +110,11 @@ object Settings {
@@ -1059,7 +1113,7 @@ index e720d5f..d7e28e9 100644
      // endregion
  }
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/MiscFragment.kt b/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/MiscFragment.kt
-index 5d4e5d0..5241e95 100644
+index 5d4e5d09..5241e954 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/MiscFragment.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/MiscFragment.kt
 @@ -12,6 +12,8 @@ import android.widget.EditText
@@ -1137,7 +1191,7 @@ index 5d4e5d0..5241e95 100644
          @Suppress("DEPRECATION")
          startActivityForResult(Intent.createChooser(Intent().apply {
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/ToolFragment.kt b/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/ToolFragment.kt
-index 0708216..570c464 100644
+index 07082168..570c4648 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/ToolFragment.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/ToolFragment.kt
 @@ -45,6 +45,60 @@ class ToolFragment : BiliRoamingBaseSettingFragment() {
@@ -1202,7 +1256,7 @@ index 0708216..570c464 100644
  
      private fun route() {
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/fragments.kt b/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/fragments.kt
-index 68d672d..467d5ba 100644
+index 68d672d3..467d5ba9 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/fragments.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/settings/fragments/fragments.kt
 @@ -11,9 +11,6 @@ class BlockFollowFragment : BiliRoamingBaseSettingFragment()
@@ -1229,7 +1283,7 @@ index 68d672d..467d5ba 100644
  class FilterDynamicByTypeFragment : BiliRoamingBaseSettingFragment()
  
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/utils/KtUtils.kt b/integrations/app/src/main/java/app/revanced/bilibili/utils/KtUtils.kt
-index f219e6d..7587c31 100644
+index f219e6d2..7587c314 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/utils/KtUtils.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/utils/KtUtils.kt
 @@ -788,7 +788,7 @@ inline fun <reified T> Context.requireSystemService(): T = getSystemService(T::c
@@ -1242,7 +1296,7 @@ index f219e6d..7587c31 100644
  
  inline fun <T> List<T>.forEachIndexedReversed(action: (index: Int, T) -> Unit) {
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/utils/Themes.kt b/integrations/app/src/main/java/app/revanced/bilibili/utils/Themes.kt
-index 2e7fd30..43e56bf 100644
+index 2e7fd30d..43e56bf1 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/utils/Themes.kt
 +++ b/integrations/app/src/main/java/app/revanced/bilibili/utils/Themes.kt
 @@ -34,6 +34,7 @@ object Themes {
@@ -1253,8 +1307,451 @@ index 2e7fd30..43e56bf 100644
      val isNightTheme get() = currentThemeId == 1
      val isWhiteTheme get() = currentThemeId == 8
  
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/config/fingerprints/DDContractImplFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/config/fingerprints/DDContractImplFingerprint.kt
+index df29ddc6..04714356 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/config/fingerprints/DDContractImplFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/config/fingerprints/DDContractImplFingerprint.kt
+@@ -3,5 +3,8 @@ package app.revanced.patches.bilibili.misc.config.fingerprints
+ import app.revanced.patcher.fingerprint.MethodFingerprint
+ 
+ object DDContractImplFingerprint : MethodFingerprint(
++    returnType = "Ljava/lang/String;",
++    parameters = listOf("Ljava/lang/String;", "Ljava/lang/String;", "Lkotlin/jvm/functions/Function1;"),
+     strings = listOf("public.dd.result"),
++    customFingerprint = { _, classDef -> classDef.interfaces.size == 1 }
+ )
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/config/patch/ConfigPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/config/patch/ConfigPatch.kt
+index 57fa96cb..2ee6994e 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/config/patch/ConfigPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/config/patch/ConfigPatch.kt
+@@ -85,13 +85,24 @@ object ConfigPatch : BytecodePatch(
+ 
+         val ddContractInterface = DDContractImplFingerprint.result?.classDef?.interfaces?.first()
+             ?: return
+-        context.classes.filter { it.interfaces == listOf(ddContractInterface) }.forEach { c ->
++        context.classes.filter { cl ->
++            cl.interfaces == listOf(ddContractInterface)
++                    && cl.methods.any { m ->
++                m.returnType == "Ljava/lang/String;" && m.parameterTypes.let {
++                    it.size >= 2 && it[0] == "Ljava/lang/String;" && it[1] == "Ljava/lang/String;"
++                }
++            } && cl.methods.any { m ->
++                m.returnType == "Z" && m.parameterTypes.let {
++                    it.size >= 2 && it[0] == "Ljava/lang/String;" && it[1] == "Z"
++                }
++            }
++        }.forEach { c ->
+             c.proxy(context).run {
+                 fun Method.args() = (0..parameterTypes.size).joinToString { "p$it" }
+ 
+                 val getStringMethod = methods.first { m ->
+                     m.returnType == "Ljava/lang/String;" && m.parameterTypes.let {
+-                        it[0] == "Ljava/lang/String;" && it[1] == "Ljava/lang/String;"
++                        it.size >= 2 && it[0] == "Ljava/lang/String;" && it[1] == "Ljava/lang/String;"
+                     }
+                 }
+                 getStringMethod.cloneMutable(
+@@ -112,7 +123,7 @@ object ConfigPatch : BytecodePatch(
+ 
+                 val getBooleanMethod = methods.first { m ->
+                     m.returnType == "Z" && m.parameterTypes.let {
+-                        it[0] == "Ljava/lang/String;" && it[1] == "Z"
++                        it.size >= 2 && it[0] == "Ljava/lang/String;" && it[1] == "Z"
+                     }
+                 }
+                 getBooleanMethod.cloneMutable(
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/fingerprints/BaseCommentCopyFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/fingerprints/BaseCommentCopyFingerprint.kt
+index 8c9254a0..986b2018 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/fingerprints/BaseCommentCopyFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/fingerprints/BaseCommentCopyFingerprint.kt
+@@ -3,22 +3,28 @@ package app.revanced.patches.bilibili.misc.copy.fingerprints
+ import app.revanced.patcher.fingerprint.MethodFingerprint
+ import com.android.tools.smali.dexlib2.AccessFlags
+ import com.android.tools.smali.dexlib2.Opcode
++import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
++import com.android.tools.smali.dexlib2.iface.reference.MethodReference
+ 
++/**
++ * 9.12.0: R8 重排了 lambda 里的取字段顺序，原来写死的 opcodes 序列
++ * (IGET_OBJECT, IGET_OBJECT, INVOKE_STATIC, MOVE_RESULT, RETURN) 已经对不上。
++ * opcodes 本来就是每个版本都会变的脆弱约束，改用结构判据：
++ * 这类 lambda 一定是「两个合成字段 + 把结果拆箱成 boolean 返回」。
++ */
+ open class BaseCommentCopyFingerprint(identityType: String) : MethodFingerprint(
+     returnType = "Z",
+     parameters = listOf("Landroid/view/View;"),
+-    opcodes = listOf(
+-        Opcode.IGET_OBJECT,
+-        Opcode.IGET_OBJECT,
+-        Opcode.INVOKE_STATIC,
+-        Opcode.MOVE_RESULT,
+-        Opcode.RETURN
+-    ),
+     customFingerprint = { methodDef, classDef ->
+         methodDef.name == "onLongClick" && classDef.interfaces == listOf("Landroid/view/View\$OnLongClickListener;")
+                 && classDef.fields.toList().let { fields ->
+             fields.count() == 2 && fields.all { AccessFlags.SYNTHETIC.isSet(it.accessFlags) }
+                     && fields.any { it.type == identityType }
+-        }
++        } && methodDef.implementation?.instructions?.any { instruction ->
++            instruction.opcode == Opcode.INVOKE_VIRTUAL
++                    && ((instruction as? ReferenceInstruction)?.reference as? MethodReference)?.let {
++                it.definingClass == "Ljava/lang/Boolean;" && it.name == "booleanValue"
++            } == true
++        } == true
+     }
+ )
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/fingerprints/Comment3CopyFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/fingerprints/Comment3CopyFingerprint.kt
+index 628238b4..0204be4a 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/fingerprints/Comment3CopyFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/fingerprints/Comment3CopyFingerprint.kt
+@@ -1,5 +1,22 @@
+ package app.revanced.patches.bilibili.misc.copy.fingerprints
+ 
+-object Comment3CopyFingerprint : BaseCommentCopyFingerprint(
+-    "Lcom/bilibili/app/comment3/data/model/CommentItem;"
++import app.revanced.patches.bilibili.patcher.fingerprint.MultiMethodFingerprint
++import com.android.tools.smali.dexlib2.AccessFlags
++
++/**
++ * 9.12.0: comment3 的内容长按 lambda 从「两个合成字段」变成五个，且同形的有 4 个
++ * （CommentContentRichTextHandler 的三个 + handler/J 的一个），谁都不比谁更"正"，
++ * 所以不再当单命中指纹，改成多命中、全部挂钩。
++ */
++object Comment3CopyFingerprint : MultiMethodFingerprint(
++    returnType = "Z",
++    parameters = listOf("Landroid/view/View;"),
++    customFingerprint = { methodDef, classDef ->
++        methodDef.name == "onLongClick"
++                && classDef.interfaces == listOf("Landroid/view/View\$OnLongClickListener;")
++                && classDef.fields.toList().let { fields ->
++            fields.isNotEmpty() && fields.all { AccessFlags.SYNTHETIC.isSet(it.accessFlags) }
++                    && fields.any { it.type == "Lcom/bilibili/app/comment3/data/model/CommentItem;" }
++        }
++    }
+ )
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/fingerprints/ConversationCopyFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/fingerprints/ConversationCopyFingerprint.kt
+index 9e18f27d..e2f756a8 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/fingerprints/ConversationCopyFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/fingerprints/ConversationCopyFingerprint.kt
+@@ -2,10 +2,12 @@ package app.revanced.patches.bilibili.misc.copy.fingerprints
+ 
+ import app.revanced.patcher.fingerprint.MethodFingerprint
+ 
++/**
++ * 9.12.0: 这段逻辑从 ConversationActivity 的 8 参方法搬进了合成 lambda 类
++ * `Lcom/bilibili/bplus/im/conversation/s;->a(Ljava/lang/String;)V`，原来按类名限定就匹配不到了。
++ * 全包里带 "im.chat-group.msg.repost.click" 的方法只有这一个，两个字符串已足够唯一。
++ */
+ object ConversationCopyFingerprint : MethodFingerprint(
+     returnType = "V",
+-    strings = listOf("clipboard", "im.chat-group.msg.repost.click"),
+-    customFingerprint = { _, classDef ->
+-        classDef.type == "Lcom/bilibili/bplus/im/conversation/ConversationActivity;"
+-    }
++    strings = listOf("clipboard", "im.chat-group.msg.repost.click")
+ )
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/fingerprints/DescCopyFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/fingerprints/DescCopyFingerprint.kt
+index 2aa75c0c..607a22f1 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/fingerprints/DescCopyFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/fingerprints/DescCopyFingerprint.kt
+@@ -4,6 +4,6 @@ import app.revanced.patches.bilibili.patcher.fingerprint.MultiMethodFingerprint
+ 
+ object DescCopyFingerprint : MultiMethodFingerprint(
+     returnType = "V",
+-    parameters = listOf("Z", "Ljava/lang/String;"),
++    parameters = listOf("Ljava/lang/String;", "Z"),
+     strings = listOf("clipboard", "text")
+ )
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/patch/CopyEnhancePatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/patch/CopyEnhancePatch.kt
+index 4fb217a5..4cbcc1af 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/patch/CopyEnhancePatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/copy/patch/CopyEnhancePatch.kt
+@@ -2,6 +2,7 @@ package app.revanced.patches.bilibili.misc.copy.patch
+ 
+ import app.revanced.patcher.data.BytecodeContext
+ import app.revanced.patcher.extensions.InstructionExtensions.addInstructionsWithLabels
++import app.revanced.patcher.fingerprint.MethodFingerprintResult
+ import app.revanced.patcher.patch.PatchException
+ import app.revanced.patcher.patch.annotation.CompatiblePackage
+ import app.revanced.patcher.patch.annotation.Patch
+@@ -11,6 +12,10 @@ import app.revanced.patches.bilibili.utils.cloneMutable
+ import app.revanced.patches.bilibili.utils.exception
+ import app.revanced.patches.bilibili.utils.proxy
+ import app.revanced.util.exception
++import com.android.tools.smali.dexlib2.iface.reference.MethodReference
++import com.android.tools.smali.dexlib2.iface.reference.FieldReference
++import com.android.tools.smali.dexlib2.Opcode
++import app.revanced.util.getReference
+ 
+ @Patch(
+     name = "Copy enhance",
+@@ -25,11 +30,10 @@ object CopyEnhancePatch : MultiMethodBytecodePatch(
+     fingerprints = setOf(
+         CommentCopyOldFingerprint,
+         CommentCopyNewFingerprint,
+-        Comment3CopyFingerprint,
+         Comment3DialogCopyFingerprint,
+         ConversationCopyFingerprint,
+     ),
+-    multiFingerprints = setOf(DescCopyFingerprint)
++    multiFingerprints = setOf(DescCopyFingerprint, Comment3CopyFingerprint)
+ ) {
+     override fun execute(context: BytecodeContext) {
+         super.execute(context)
+@@ -38,7 +42,7 @@ object CopyEnhancePatch : MultiMethodBytecodePatch(
+         }.forEach {
+             it.mutableMethod.addInstructionsWithLabels(
+                 0, """
+-                invoke-static {p1, p2}, Lapp/revanced/bilibili/patches/CopyEnhancePatch;->onCopyDesc(ZLjava/lang/String;)Z
++                invoke-static {p2, p1}, Lapp/revanced/bilibili/patches/CopyEnhancePatch;->onCopyDesc(ZLjava/lang/String;)Z
+                 move-result v0
+                 if-eqz v0, :jump
+                 return-void
+@@ -70,17 +74,10 @@ object CopyEnhancePatch : MultiMethodBytecodePatch(
+                 )
+             }
+         }
+-        listOf(
+-            CommentCopyOldFingerprint.result to "message",
+-            CommentCopyNewFingerprint.result to "comment_message",
+-            Comment3CopyFingerprint.result to "comment_message"
+-        ).apply {
+-            if (count { it.first != null } == 0)
+-                throw PatchException("CopyLongClickListener not found")
+-        }.forEach { (result, idName) ->
+-            result?.mutableClass?.interfaces?.add(onLongClickOriginListenerType)
+-            result?.mutableClass?.methods?.run {
+-                result.mutableMethod.also { m ->
++        fun MethodFingerprintResult.hookCommentLongClick(idName: String) {
++            mutableClass.interfaces.add(onLongClickOriginListenerType)
++            mutableClass.methods.run {
++                mutableMethod.also { m ->
+                     m.cloneMutable(name = "onLongClick_Origin").also { add(it) }
+                 }.addInstructionsWithLabels(
+                     0, """
+@@ -96,21 +93,74 @@ object CopyEnhancePatch : MultiMethodBytecodePatch(
+                 )
+             }
+         }
+-        ConversationCopyFingerprint.result?.mutableMethod?.addInstructionsWithLabels(
+-            0, """
+-            move-object/from16 v0, p8
+-            invoke-virtual {v0, p1}, Ljava/lang/String;->equals(Ljava/lang/Object;)Z
+-            move-result v0
+-            if-eqz v0, :jump
+-            move-object/from16 v0, p7
+-            invoke-static {p0, p2, v0}, Lapp/revanced/bilibili/patches/CopyEnhancePatch;->onConversationCopy(Landroid/app/Activity;Lcom/bilibili/bplus/im/business/model/BaseTypedMessage;Landroid/widget/PopupWindow;)Z
+-            move-result v0
+-            if-eqz v0, :jump
+-            return-void
+-            :jump
+-            nop
+-        """.trimIndent()
+-        ) ?: throw ConversationCopyFingerprint.exception
++        // 9.12.0 起 comment3 的长按 lambda 有 4 个同形实现，改成多命中全挂
++        val commentLongClickTargets = listOfNotNull(
++            CommentCopyOldFingerprint.result?.let { it to "message" },
++            CommentCopyNewFingerprint.result?.let { it to "comment_message" },
++        ) + Comment3CopyFingerprint.result.map { it to "comment_message" }
++        if (commentLongClickTargets.isEmpty())
++            throw PatchException("CopyLongClickListener not found")
++        commentLongClickTargets.forEach { (result, idName) -> result.hookCommentLongClick(idName) }
++        ConversationCopyFingerprint.result?.run {
++            val activityType = "Lcom/bilibili/bplus/im/conversation/ConversationActivity;"
++            val messageType = "Lcom/bilibili/bplus/im/business/model/BaseTypedMessage;"
++            if (mutableMethod.parameterTypes.size >= 8) {
++                // <= 8.92.1：还在 ConversationActivity 里，参数齐全
++                mutableMethod.addInstructionsWithLabels(
++                    0, """
++                    move-object/from16 v0, p8
++                    invoke-virtual {v0, p1}, Ljava/lang/String;->equals(Ljava/lang/Object;)Z
++                    move-result v0
++                    if-eqz v0, :jump
++                    move-object/from16 v0, p7
++                    invoke-static {p0, p2, v0}, Lapp/revanced/bilibili/patches/CopyEnhancePatch;->onConversationCopy(Landroid/app/Activity;${messageType}Landroid/widget/PopupWindow;)Z
++                    move-result v0
++                    if-eqz v0, :jump
++                    return-void
++                    :jump
++                    nop
++                """.trimIndent()
++                )
++            } else {
++                // 9.12.0：整段被抽成合成 lambda，原来的 8 个参数变成了类上的捕获字段
++                val instructions = mutableMethod.implementation!!.instructions.toList()
++                val equalsIndex = instructions.indexOfFirst {
++                    it.opcode == Opcode.INVOKE_VIRTUAL && it.getReference<MethodReference>()
++                        .toString() == "Ljava/lang/String;->equals(Ljava/lang/Object;)Z"
++                }
++                if (equalsIndex < 0)
++                    throw PatchException("not found String#equals in conversation copy lambda")
++                // 拿来跟点击项比对的「复制」文案，就是 equals 之前最近一个 String 型捕获字段
++                val labelField = (equalsIndex downTo 0).firstNotNullOfOrNull { index ->
++                    instructions[index].takeIf { it.opcode == Opcode.IGET_OBJECT }
++                        ?.getReference<FieldReference>()?.takeIf { it.type == "Ljava/lang/String;" }
++                } ?: throw PatchException("not found label field in conversation copy lambda")
++                val fields = mutableClass.fields
++                val activityField = fields.first { it.type == activityType }
++                val messageField = fields.first { it.type == messageType }
++                // 剩下那个既不是 String、也不是 Activity/Message 的字段就是承载菜单的 PopupWindow
++                val popupField = fields.first {
++                    it.type != "Ljava/lang/String;" && it.type != activityType && it.type != messageType
++                }
++                mutableMethod.addInstructionsWithLabels(
++                    0, """
++                    iget-object v0, p0, $labelField
++                    invoke-virtual {v0, p1}, Ljava/lang/String;->equals(Ljava/lang/Object;)Z
++                    move-result v0
++                    if-eqz v0, :jump
++                    iget-object v0, p0, $activityField
++                    iget-object v1, p0, $messageField
++                    iget-object v2, p0, $popupField
++                    invoke-static {v0, v1, v2}, Lapp/revanced/bilibili/patches/CopyEnhancePatch;->onConversationCopy(Landroid/app/Activity;${messageType}Landroid/widget/PopupWindow;)Z
++                    move-result v0
++                    if-eqz v0, :jump
++                    return-void
++                    :jump
++                    nop
++                """.trimIndent()
++                )
++            }
++        } ?: throw ConversationCopyFingerprint.exception
+         Comment3DialogCopyFingerprint.result?.run {
+             mutableMethod.cloneMutable(registerCount = 3, clearImplementation = true).apply {
+                 mutableMethod.name += "_Origin"
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/darkswitch/fingerprints/SwitchDarkModeFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/darkswitch/fingerprints/SwitchDarkModeFingerprint.kt
+index 81bdb8e4..d4237ce7 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/darkswitch/fingerprints/SwitchDarkModeFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/darkswitch/fingerprints/SwitchDarkModeFingerprint.kt
+@@ -2,10 +2,16 @@ package app.revanced.patches.bilibili.misc.darkswitch.fingerprints
+ 
+ import app.revanced.patcher.fingerprint.MethodFingerprint
+ 
++/**
++ * 9.12.0: R8 inlined `HomeUserCenterFragment#Ws(boolean)` (and its `Xs` wrapper) straight into
++ * `onClick(View)`, so the old `(Z)V` anchor no longer exists. The dark-mode branch is still
++ * self-contained inside `onClick` and still carries the only "default" string of the whole class,
++ * so anchor on `onClick` itself and splice the confirmation check into the head of that branch.
++ */
+ object SwitchDarkModeFingerprint : MethodFingerprint(
+     strings = listOf("default"),
+     returnType = "V",
+-    parameters = listOf("Z"),
++    parameters = listOf("Landroid/view/View;"),
+     customFingerprint = { _, classDef ->
+         classDef.type.endsWith("HomeUserCenterFragment;")
+     }
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/darkswitch/patch/DarkSwitchPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/darkswitch/patch/DarkSwitchPatch.kt
+index 18835b53..c324946c 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/darkswitch/patch/DarkSwitchPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/darkswitch/patch/DarkSwitchPatch.kt
+@@ -4,6 +4,7 @@ import app.revanced.patcher.data.BytecodeContext
+ import app.revanced.patcher.extensions.InstructionExtensions.addInstructions
+ import app.revanced.patcher.fingerprint.MethodFingerprint
+ import app.revanced.patcher.patch.BytecodePatch
++import app.revanced.patcher.patch.PatchException
+ import app.revanced.patcher.patch.annotation.CompatiblePackage
+ import app.revanced.patcher.patch.annotation.Patch
+ import app.revanced.patches.bilibili.misc.darkswitch.fingerprints.HdNewSwitchDarkModeFingerprint
+@@ -11,6 +12,10 @@ import app.revanced.patches.bilibili.misc.darkswitch.fingerprints.SwitchDarkMode
+ import app.revanced.patches.bilibili.utils.cloneMutable
+ import app.revanced.patches.bilibili.utils.toPublic
+ import app.revanced.util.exception
++import com.android.tools.smali.dexlib2.Opcode
++import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
++import com.android.tools.smali.dexlib2.iface.reference.MethodReference
++import com.android.tools.smali.dexlib2.iface.reference.StringReference
+ 
+ @Patch(
+     name = "Dark switch",
+@@ -25,7 +30,8 @@ object DarkSwitchPatch : BytecodePatch(
+     setOf(SwitchDarkModeFingerprint, HdNewSwitchDarkModeFingerprint)
+ ) {
+     override fun execute(context: BytecodeContext) {
+-        fun MethodFingerprint.patch() = result?.run {
++        // HD 包仍是「独立的 (Z)V 切换方法」结构：原方法改名 + 克隆出同签名桥接方法
++        fun MethodFingerprint.patchLegacy() = result?.run {
+             val listenerType = "Lapp/revanced/bilibili/widget/OnSwitchDarkModeOriginListener;"
+             mutableClass.interfaces.add(listenerType)
+             mutableMethod.cloneMutable(registerCount = 2, clearImplementation = true).apply {
+@@ -42,7 +48,34 @@ object DarkSwitchPatch : BytecodePatch(
+             }
+         }
+ 
+-        SwitchDarkModeFingerprint.patch() ?: throw SwitchDarkModeFingerprint.exception
+-        HdNewSwitchDarkModeFingerprint.patch()
++        // 手机包 9.12.0 起切换逻辑被内联进 onClick(View)，改为在深色分支入口处插一个拦截点。
++        // 分支入口特征：类内唯一的 const-string "default" 往前数最近的一条 Fragment#getActivity()，
++        // 那条指令的下一句就是 move-result-object p1，所以此处 p1（View）是「读后即死」，可安全复用。
++        SwitchDarkModeFingerprint.result?.run {
++            val instructions = mutableMethod.implementation!!.instructions.toList()
++            val defaultIndex = instructions.indexOfFirst {
++                (it.opcode == Opcode.CONST_STRING || it.opcode == Opcode.CONST_STRING_JUMBO)
++                        && ((it as? ReferenceInstruction)?.reference as? StringReference)?.string == "default"
++            }
++            if (defaultIndex < 0)
++                throw PatchException("not found \"default\" string in HomeUserCenterFragment#onClick")
++            val getActivityIndex = (defaultIndex downTo 0).firstOrNull { index ->
++                val instruction = instructions[index]
++                instruction.opcode == Opcode.INVOKE_VIRTUAL
++                        && ((instruction as? ReferenceInstruction)?.reference as? MethodReference)?.name == "getActivity"
++            } ?: throw PatchException("not found getActivity() before dark mode branch")
++            mutableMethod.addInstructions(
++                getActivityIndex, """
++                invoke-static {p0, p1}, Lapp/revanced/bilibili/patches/DarkSwitchPatch;->interceptDarkSwitch(Ljava/lang/Object;Landroid/view/View;)Z
++                move-result p1
++                if-eqz p1, :dark_switch_go
++                return-void
++                :dark_switch_go
++                nop
++            """.trimIndent()
++            )
++        } ?: throw SwitchDarkModeFingerprint.exception
++
++        HdNewSwitchDarkModeFingerprint.patchLegacy()
+     }
+ }
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/drawer/patch/DrawerPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/drawer/patch/DrawerPatch.kt
+index a06ea140..01801e35 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/drawer/patch/DrawerPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/drawer/patch/DrawerPatch.kt
+@@ -64,12 +64,14 @@ object DrawerPatch : BytecodePatch(
+             context.findClass("Lapp/revanced/bilibili/patches/drawer/DrawerLayoutEx\$LayoutParamsEx;")!!
+         val result = DrawerLayoutParamsFingerprint.result
+             ?: throw DrawerLayoutParamsFingerprint.exception
+-        val gravityField = result.mutableClass.fields.first {
+-            it.type == "I" && it.accessFlags.isPublic()
+-        }
+-        val openStateField = result.mutableClass.fields.first {
+-            it.type == "I" && it.accessFlags == 0
+-        }.also { it.accessFlags = it.accessFlags.toPublic() }
++        // 9.12.0 起 R8 把 DrawerLayout$LayoutParams 的字段全部提升为 public，
++        // 不能再靠 accessFlags 区分 gravity(public int) 和 openState(package-private int)。
++        // 该类只有两个 int 字段，gravity 名字未被混淆，另一个即 openState。
++        val intFields = result.mutableClass.fields.filter { it.type == "I" }
++        val gravityField = intFields.firstOrNull { it.name == "gravity" }
++            ?: intFields.first { it.accessFlags.isPublic() }
++        val openStateField = intFields.single { it.name != gravityField.name }
++            .also { it.accessFlags = it.accessFlags.toPublic() }
+         layoutParamsExClass.mutableClass.setSuperClass(gravityField.definingClass)
+         layoutParamsExClass.mutableClass.methods.run {
+             first { it.name == "<init>" }.replaceInstruction(
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/integrations/fingerprints/BaseMainFrameFragmentFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/integrations/fingerprints/BaseMainFrameFragmentFingerprint.kt
+index 5911f89d..a85f5564 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/integrations/fingerprints/BaseMainFrameFragmentFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/integrations/fingerprints/BaseMainFrameFragmentFingerprint.kt
+@@ -4,6 +4,6 @@ import app.revanced.patcher.fingerprint.MethodFingerprint
+ 
+ object BaseMainFrameFragmentFingerprint : MethodFingerprint(
+     strings = listOf("home.menu_update_enable"),
+-    parameters = listOf("Ljava/util/List;"),
+-    returnType = "V"
++    parameters = listOf("Lbolts/Task;"),
++    returnType = "Ljava/lang/Object;"
+ )
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/json/patch/PegasusPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/json/patch/PegasusPatch.kt
-index 2f85601..7f9876f 100644
+index 2f856019..7f9876fc 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/json/patch/PegasusPatch.kt
 +++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/json/patch/PegasusPatch.kt
 @@ -53,28 +53,31 @@ object PegasusPatch : BytecodePatch(
@@ -1308,10 +1805,18 @@ index 2f85601..7f9876f 100644
          fun MutableMethod.hookOnFeedClick() = addInstructionsWithLabels(
              0, """
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/notification/fingerprints/NotificationStyleAbFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/notification/fingerprints/NotificationStyleAbFingerprint.kt
-index 85e7765..f2c45bb 100644
+index 85e7765c..f1fab392 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/notification/fingerprints/NotificationStyleAbFingerprint.kt
 +++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/notification/fingerprints/NotificationStyleAbFingerprint.kt
-@@ -7,3 +7,13 @@ object NotificationStyleAbFingerprint : MethodFingerprint(
+@@ -1,9 +1,37 @@
+ package app.revanced.patches.bilibili.misc.notification.fingerprints
+ 
+ import app.revanced.patcher.fingerprint.MethodFingerprint
++import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
++import com.android.tools.smali.dexlib2.iface.reference.MethodReference
+ 
+ object NotificationStyleAbFingerprint : MethodFingerprint(
+     strings = listOf("ff_background_use_system_media_controls"),
      returnType = "Z",
      parameters = listOf()
  )
@@ -1319,14 +1824,30 @@ index 85e7765..f2c45bb 100644
 +/**
 + * Since 8.92.x the A/B flag was replaced by a device decision
 + * `DeviceDecision.getBoolean("dd_enable_system_media_control", false)`.
++ *
++ * Since 9.x R8 merges that lambda body into a shared synthetic
++ * `Function0.invoke()Ljava/lang/Object;` dispatched by a packed-switch
++ * (9.12.0: `LKg1/c;`, index 6), so the string no longer lives in a `()Z`
++ * method and that method must not be hooked.
++ *
++ * Hook the aggregated decision instead. 9.12.0:
++ * `Ltv/danmaku/bili/ui/player/notification/a$a;->b()Z` =
++ * `SDK_INT >= 30 && !(RomUtils.isHarmony() && ddDisableHarmony) && ddEnableSystemMediaControl`
 + */
 +object SystemMediaControlDecisionFingerprint : MethodFingerprint(
-+    strings = listOf("dd_enable_system_media_control"),
 +    returnType = "Z",
-+    parameters = listOf()
++    parameters = listOf(),
++    customFingerprint = { method, classDef ->
++        classDef.type.startsWith("Ltv/danmaku/bili/ui/player/notification/")
++                && method.implementation?.instructions?.any { instruction ->
++            ((instruction as? ReferenceInstruction)?.reference as? MethodReference)?.let {
++                it.name == "isHarmony" && it.definingClass.endsWith("/RomUtils;")
++            } == true
++        } == true
++    }
 +)
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/notification/patch/MusicNotificationPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/notification/patch/MusicNotificationPatch.kt
-index dd756b1..6cce28c 100644
+index dd756b1a..6cce28c7 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/notification/patch/MusicNotificationPatch.kt
 +++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/notification/patch/MusicNotificationPatch.kt
 @@ -14,6 +14,7 @@ import app.revanced.patches.bilibili.misc.notification.fingerprints.HeadsetMedia
@@ -1354,8 +1875,187 @@ index dd756b1..6cce28c 100644
              0, """
              invoke-static {}, $patchClass->enabled()Z
              move-result v0
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/okhttp/fingerprints/HttpUrlFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/okhttp/fingerprints/HttpUrlFingerprint.kt
+index 90e89b05..a008838b 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/okhttp/fingerprints/HttpUrlFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/okhttp/fingerprints/HttpUrlFingerprint.kt
+@@ -2,4 +2,13 @@ package app.revanced.patches.bilibili.misc.okhttp.fingerprints
+ 
+ import app.revanced.patcher.fingerprint.MethodFingerprint
+ 
+-object HttpUrlFingerprint : MethodFingerprint(strings = listOf("javaWhitespace"))
++object HttpUrlFingerprint : MethodFingerprint(
++    strings = listOf("javaWhitespace"),
++    // 9.12.0 起 apk 内多了一份 shaded okhttp：com.tencent.cloud.ai.network.okhttp3（classes19.dex），
++    // 排在真 okhttp3（classes23.dex）之前会被优先命中；不排除的话本指纹拿到的是
++    // Lcom/tencent/cloud/ai/network/okhttp3/p;，而 RequestFingerprint 仍是 Lokhttp3/Request;，
++    // 后续按类型找字段就会抛 "Collection contains no element matching the predicate."
++    customFingerprint = { _, classDef ->
++        !classDef.type.startsWith("Lcom/tencent/cloud/ai/network/")
++    }
++)
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/okhttp/fingerprints/MediaTypeGetFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/okhttp/fingerprints/MediaTypeGetFingerprint.kt
+index 7c21f4f3..99ba32a8 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/okhttp/fingerprints/MediaTypeGetFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/okhttp/fingerprints/MediaTypeGetFingerprint.kt
+@@ -2,4 +2,10 @@ package app.revanced.patches.bilibili.misc.okhttp.fingerprints
+ 
+ import app.revanced.patcher.fingerprint.MethodFingerprint
+ 
+-object MediaTypeGetFingerprint : MethodFingerprint(strings = listOf("No subtype found for:"))
++object MediaTypeGetFingerprint : MethodFingerprint(
++    strings = listOf("No subtype found for:"),
++    // 排除 9.12.0 新增的 shaded okhttp（com.tencent.cloud.ai.network.okhttp3）
++    customFingerprint = { _, classDef ->
++        !classDef.type.startsWith("Lcom/tencent/cloud/ai/network/")
++    }
++)
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/okhttp/fingerprints/ResponseBodyFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/okhttp/fingerprints/ResponseBodyFingerprint.kt
+index 3e2e9357..f83261a7 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/okhttp/fingerprints/ResponseBodyFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/okhttp/fingerprints/ResponseBodyFingerprint.kt
+@@ -3,5 +3,9 @@ package app.revanced.patches.bilibili.misc.okhttp.fingerprints
+ import app.revanced.patcher.fingerprint.MethodFingerprint
+ 
+ object ResponseBodyFingerprint : MethodFingerprint(
+-    strings = listOf("Cannot buffer entire body for content length: ")
++    strings = listOf("Cannot buffer entire body for content length: "),
++    // 排除 9.12.0 新增的 shaded okhttp（com.tencent.cloud.ai.network.okhttp3）
++    customFingerprint = { _, classDef ->
++        !classDef.type.startsWith("Lcom/tencent/cloud/ai/network/")
++    }
+ )
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/okhttp/fingerprints/ResponseFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/okhttp/fingerprints/ResponseFingerprint.kt
+index 138c680f..bd9edfc0 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/okhttp/fingerprints/ResponseFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/okhttp/fingerprints/ResponseFingerprint.kt
+@@ -6,6 +6,10 @@ import app.revanced.patches.bilibili.utils.isNative
+ object ResponseFingerprint : MethodFingerprint(
+     strings = listOf("Response{protocol="),
+     customFingerprint = { _, classDef ->
+-        classDef.interfaces == listOf("Ljava/io/Closeable;") && classDef.methods.none { it.accessFlags.isNative() }
++        // 排除 9.12.0 新增的 shaded okhttp（com.tencent.cloud.ai.network.okhttp3）：
++        // 它那份 Response 同样 implements Closeable 且无 native 方法，不排除会先被命中
++        !classDef.type.startsWith("Lcom/tencent/cloud/ai/network/")
++                && classDef.interfaces == listOf("Ljava/io/Closeable;")
++                && classDef.methods.none { it.accessFlags.isNative() }
+     }
+ )
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/CommentConfigFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/CommentConfigFingerprint.kt
+index f55e4103..d251a283 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/CommentConfigFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/CommentConfigFingerprint.kt
+@@ -4,4 +4,9 @@ import app.revanced.patcher.fingerprint.MethodFingerprint
+ 
+ object CommentConfigFingerprint : MethodFingerprint(
+     strings = listOf("CommentConfig(themeMode=", "seekEnabled="),
++    // 9.12.0 起同包多了个 PartialCommentConfig(Lhl/H;)，它 toString 里的
++    // "PartialCommentConfig(themeMode=" 同样 contains 上面两个串（ReVanced 字符串匹配是 contains），
++    // 会跟真正的 CommentConfig(Lhl/g;) 抢命中，谁先中取决于 dex 遍历顺序。
++    // 区别：PartialCommentConfig 的字段全是装箱 Ljava/lang/Boolean;，只有 CommentConfig 有原始 boolean 字段。
++    customFingerprint = { _, classDef -> classDef.fields.any { it.type == "Z" } }
+ )
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/LogcatAdapterFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/LogcatAdapterFingerprint.kt
+index fd73d5c8..f0a743ab 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/LogcatAdapterFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/LogcatAdapterFingerprint.kt
+@@ -3,7 +3,7 @@ package app.revanced.patches.bilibili.misc.other.fingerprints
+ import app.revanced.patcher.fingerprint.MethodFingerprint
+ 
+ object LogcatAdapterFingerprint : MethodFingerprint(
+-    strings = listOf("BLOG-EVENT-"),
++    strings = listOf("BLOG-EVENT"),
+     returnType = "V",
+     parameters = listOf("Ljava/lang/String;", "Ljava/lang/String;")
+ )
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/MineBindAccountStateFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/MineBindAccountStateFingerprint.kt
+index a77525d5..b2e9eca9 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/MineBindAccountStateFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/MineBindAccountStateFingerprint.kt
+@@ -1,12 +1,25 @@
+ package app.revanced.patches.bilibili.misc.other.fingerprints
+ 
+ import app.revanced.patcher.fingerprint.MethodFingerprint
++import com.android.tools.smali.dexlib2.AccessFlags
+ 
++/**
++ * 9.12.0: the mine-page account binding (including the "-" / "0" number formatting) was
++ * inlined by R8 into the flow collector
++ * `HomeUserCenterFragment$onViewCreated$3$2.invokeSuspend(Object)Object`, so the old
++ * `(AccountMine, Z)V` + strings ["-", "0"] fingerprint no longer resolves.
++ * The very last statement of that collector is
++ * `HomeUserCenterFragment.Qf(fragment, state.accountMine)` (static, executed after the
++ * counts are written), which is the equivalent hook point.
++ */
+ object MineBindAccountStateFingerprint : MethodFingerprint(
+-    strings = listOf("-", "0"),
+-    parameters = listOf("Ltv/danmaku/bili/ui/main2/api/AccountMine;", "Z"),
+     returnType = "V",
+-    customFingerprint = { _, classDef ->
+-        classDef.type == "Ltv/danmaku/bili/ui/main2/mine/HomeUserCenterFragment;" || classDef.type == "Ltv/danmaku/bilibilihd/ui/main/mine/HdHomeUserCenterFragment;"
++    customFingerprint = { methodDef, classDef ->
++        (classDef.type == "Ltv/danmaku/bili/ui/main2/mine/HomeUserCenterFragment;"
++                || classDef.type == "Ltv/danmaku/bilibilihd/ui/main/mine/HdHomeUserCenterFragment;")
++                && AccessFlags.STATIC.isSet(methodDef.accessFlags)
++                && methodDef.parameterTypes.size == 2
++                && methodDef.parameterTypes[0] == classDef.type
++                && methodDef.parameterTypes[1] == "Ltv/danmaku/bili/ui/main2/api/AccountMine;"
+     }
+ )
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/QualityViewHolderFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/QualityViewHolderFingerprint.kt
+index 61e56c11..d856c777 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/QualityViewHolderFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/QualityViewHolderFingerprint.kt
+@@ -3,5 +3,11 @@ package app.revanced.patches.bilibili.misc.other.fingerprints
+ import app.revanced.patches.bilibili.patcher.fingerprint.MultiMethodFingerprint
+ 
+ object QualityViewHolderFingerprint : MultiMethodFingerprint(
++    // 9.12.0 起角标绑定被内联进 adapter 的 onBindViewHolder，
++    // 光靠两个字符串会同时命中 Pl0/c->invoke() 和 quality/x->a()V
++    // （后者是因为 "player.qn_4k_tip_repeat".contains("player.qn_4k_tip")），
++    // 用返回值 + 参数收紧到唯一的 h0->onBindViewHolder
++    returnType = "V",
++    parameters = listOf("Landroidx/recyclerview/widget/RecyclerView\$ViewHolder;", "I"),
+     strings = listOf("last_4k_hint_show_timestamp", "player.qn_4k_tip")
+ )
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/SpaceBindAccountStateFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/SpaceBindAccountStateFingerprint.kt
+index 233918bd..66e7f1b0 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/SpaceBindAccountStateFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/SpaceBindAccountStateFingerprint.kt
+@@ -1,12 +1,29 @@
+ package app.revanced.patches.bilibili.misc.other.fingerprints
+ 
+ import app.revanced.patcher.fingerprint.MethodFingerprint
++import com.android.tools.smali.dexlib2.Opcode
++import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
++import com.android.tools.smali.dexlib2.iface.reference.MethodReference
+ 
++/**
++ * 9.12.0: the space-header count binding was inlined by R8 into
++ * `AuthorSpaceActivity.W7(AuthorSpaceActivity, BiliSpace)V`, so SpaceHeaderFragment2 no
++ * longer owns a `(BiliMemberCard)V` method containing the "-" / "0" strings.
++ * `SpaceHeaderFragment2.gg(BiliMemberCard)V` is invoked right after that block (at the
++ * `:goto_3c4` merge point) and keeps the exact old shape, so hook it instead.
++ * The class has two `(BiliMemberCard)V` methods (Wf and gg); only gg calls
++ * `BiliMemberCard.isSilence()`, which is used here to disambiguate.
++ */
+ object SpaceBindAccountStateFingerprint : MethodFingerprint(
+-    strings = listOf("-", "0"),
+     parameters = listOf("Lcom/bilibili/app/authorspace/api/BiliMemberCard;"),
+     returnType = "V",
+-    customFingerprint = { _, classDef ->
++    customFingerprint = { methodDef, classDef ->
+         classDef.type == "Lcom/bilibili/app/authorspace/ui/SpaceHeaderFragment2;"
++                && methodDef.implementation?.instructions?.any {
++            it.opcode == Opcode.INVOKE_VIRTUAL && (it as ReferenceInstruction).reference.let { ref ->
++                ref is MethodReference && ref.name == "isSilence"
++                        && ref.definingClass == "Lcom/bilibili/app/authorspace/api/BiliMemberCard;"
++            }
++        } ?: false
+     }
+ )
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/UniteDownloadMenuInvokeFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/UniteDownloadMenuInvokeFingerprint.kt
-index 31e07f8..ce68f0e 100644
+index 31e07f8b..ce68f0e6 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/UniteDownloadMenuInvokeFingerprint.kt
 +++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/UniteDownloadMenuInvokeFingerprint.kt
 @@ -1,9 +1,24 @@
@@ -1383,8 +2083,27 @@ index 31e07f8..ce68f0e 100644
 +                && classDef.type.contains("/theseus/united/")
 +    }
 +)
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/WebConfigFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/WebConfigFingerprint.kt
+index 3fba0165..6d394466 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/WebConfigFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/fingerprints/WebConfigFingerprint.kt
+@@ -2,8 +2,11 @@ package app.revanced.patches.bilibili.misc.other.fingerprints
+ 
+ import app.revanced.patcher.fingerprint.MethodFingerprint
+ 
++// 9.12.0: GlobalConfig$b.e()Z（读 debug_config 的 force_webview）已被 R8 内联掉，
++// 全包内唯一消费该开关的地方是 AppRuntime.Q(Z)V，直接指纹该方法。
++// "miniapp.widget_use_v8" 在整个 smali 里只出现在这一个方法里，保证唯一命中。
+ object WebConfigFingerprint : MethodFingerprint(
+-    strings = listOf("force_webview"),
+-    parameters = listOf(),
+-    returnType = "Z",
++    strings = listOf("miniapp.widget_use_v8", "force_webview"),
++    parameters = listOf("Z"),
++    returnType = "V",
+ )
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/AutoLikePatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/AutoLikePatch.kt
-index 9a27f5f..962d6d6 100644
+index 9a27f5f6..962d6d6f 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/AutoLikePatch.kt
 +++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/AutoLikePatch.kt
 @@ -22,8 +22,9 @@ import com.android.tools.smali.dexlib2.Opcode
@@ -1400,7 +2119,7 @@ index 9a27f5f..962d6d6 100644
              m.parameterTypes.size == 1 && m.returnType == "V" && !AccessFlags.FINAL.isSet(m.accessFlags)
          } ?: throw PatchException("can not found like method")
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/BLRoutePatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/BLRoutePatch.kt
-index 3b5884c..29e9fc1 100644
+index 3b5884cd..29e9fc1a 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/BLRoutePatch.kt
 +++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/BLRoutePatch.kt
 @@ -3,6 +3,7 @@ package app.revanced.patches.bilibili.misc.other.patch
@@ -1479,11 +2198,47 @@ index 3b5884c..29e9fc1 100644
                      invoke-static {v0, p1}, $routeToMethod
                      return-void
                  """.trimIndent()
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/BLogPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/BLogPatch.kt
+index ec23d3e3..33dcd34b 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/BLogPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/BLogPatch.kt
+@@ -21,8 +21,8 @@ import app.revanced.util.exception
+ object BLogPatch : BytecodePatch(setOf(LogcatAdapterFingerprint)) {
+     override fun execute(context: BytecodeContext) {
+         LogcatAdapterFingerprint.result?.mutableClass?.methods?.run {
+-            val origMethod = first { it.returnType == "Z" && it.parameterTypes == listOf("I", "Ljava/lang/String;") }
+-            origMethod.cloneMutable(registerCount = 4, clearImplementation = true).apply {
++            val origMethod = first { it.returnType == "Z" && it.parameterTypes == listOf("I") }
++            origMethod.cloneMutable(registerCount = 3, clearImplementation = true).apply {
+                 origMethod.name += "_Origin"
+                 addInstructionsWithLabels(
+                     0, """
+@@ -31,7 +31,7 @@ object BLogPatch : BytecodePatch(setOf(LogcatAdapterFingerprint)) {
+                     if-eqz v0, :jump
+                     goto :return
+                     :jump
+-                    invoke-virtual {p0, p1, p2}, $origMethod
++                    invoke-virtual {p0, p1}, $origMethod
+                     move-result v0
+                     :return
+                     return v0
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/BiliLayoutAdjustResourcesPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/BiliLayoutAdjustResourcesPatch.kt
+index 4523f014..cd62e7ec 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/BiliLayoutAdjustResourcesPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/BiliLayoutAdjustResourcesPatch.kt
+@@ -366,7 +366,6 @@ object BiliLayoutAdjustResourcesPatch : ResourcePatch() {
+                         android:id="@id/arrow"
+                         android:layout_width="24dp"
+                         android:layout_height="24dp"
+-                        android:background="@drawable/theseus_shape_arrow_button_bg"
+                         android:padding="4dp"
+                         app:layout_constraintBottom_toBottomOf="parent"
+                         app:layout_constraintLeft_toRightOf="@id/order_layout"
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/CacheRedirectPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/CacheRedirectPatch.kt
-index ba17488..40098bf 100644
+index ba174888..7c177ae2 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/CacheRedirectPatch.kt
 +++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/CacheRedirectPatch.kt
-@@ -8,6 +8,8 @@ import app.revanced.patcher.patch.annotation.Patch
+@@ -8,12 +8,16 @@ import app.revanced.patcher.patch.annotation.Patch
  import app.revanced.patches.bilibili.misc.other.fingerprints.OnOgvDownloadFingerprint
  import app.revanced.patches.bilibili.misc.other.fingerprints.TheseusOnOgvDownloadFingerprint
  import app.revanced.patches.bilibili.misc.other.fingerprints.UniteDownloadMenuInvokeFingerprint
@@ -1492,7 +2247,15 @@ index ba17488..40098bf 100644
  import app.revanced.patches.bilibili.misc.settings.patch.SettingsResourcePatch
  import app.revanced.patches.bilibili.patcher.patch.MultiMethodBytecodePatch
  import app.revanced.patches.bilibili.utils.*
-@@ -27,7 +29,7 @@ import com.android.tools.smali.dexlib2.iface.value.IntEncodedValue
+ import app.revanced.patches.shared.misc.mapping.ResourceMappingPatch
+ import com.android.tools.smali.dexlib2.Opcode
++import com.android.tools.smali.dexlib2.iface.instruction.NarrowLiteralInstruction
+ import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
++import com.android.tools.smali.dexlib2.iface.reference.TypeReference
+ import com.android.tools.smali.dexlib2.iface.value.IntEncodedValue
+ 
+ @Patch(
+@@ -27,7 +31,7 @@ import com.android.tools.smali.dexlib2.iface.value.IntEncodedValue
      dependencies = [ResourceMappingPatch::class, SettingsResourcePatch::class]
  )
  object CacheRedirectPatch : MultiMethodBytecodePatch(
@@ -1501,7 +2264,54 @@ index ba17488..40098bf 100644
      multiFingerprints = setOf(OnOgvDownloadFingerprint)
  ) {
      override fun execute(context: BytecodeContext) {
-@@ -75,9 +77,10 @@ object CacheRedirectPatch : MultiMethodBytecodePatch(
+@@ -40,21 +44,36 @@ object CacheRedirectPatch : MultiMethodBytecodePatch(
+         val dialogMenuLayoutId = ResourceMappingPatch.resourceMappings.first {
+             it.type == "layout" && it.name == dialogMenuLayoutName
+         }.id
+-        val dialogMenuLayoutIdField = context.classes.firstNotNullOf { c ->
++        // <= 8.92.x: 布局 id 是一个 `public static int` R 字段，且 ViewHolder 自己 inflate 布局，
++        // 所以点击监听就在同一个类里。9.12.0 起 R8 把 R 常量内联成了 `const` 指令，并把 inflate
++        // 提升进了 Adapter 的 onCreateViewHolder，于是字段没了、点击监听落在该方法 new 出来的
++        // ViewHolder 里（b$b.onCreateViewHolder -> b$c.onClick）。两种形态都要认。
++        val dialogMenuLayoutIdField = context.classes.firstNotNullOfOrNull { c ->
+             c.fields.find { f ->
+                 f.accessFlags.let { it.isPublic() && it.isStatic() }
+                         && f.type == "I" && (f.initialValue as? IntEncodedValue)?.value == dialogMenuLayoutId
+             }
+         }
+-        context.classes.firstNotNullOf { c ->
+-            if (c.methods.asSequence().filterNot { m ->
+-                    m.accessFlags.let { it.isAbstract() || it.isNative() }
+-                }.any { m ->
+-                    m.implementation!!.instructions.any {
+-                        it.opcode == Opcode.SGET && (it as ReferenceInstruction).reference == dialogMenuLayoutIdField
+-                    }
+-                }) c else null
+-        }.let { c ->
++        (context.classes.asSequence().firstNotNullOfOrNull { c ->
++            c.methods.asSequence().filterNot { m ->
++                m.accessFlags.let { it.isAbstract() || it.isNative() }
++            }.mapNotNull { m -> m.implementation?.instructions?.toList() }.filter { instructions ->
++                instructions.any {
++                    (dialogMenuLayoutIdField != null && it.opcode == Opcode.SGET
++                            && (it as ReferenceInstruction).reference == dialogMenuLayoutIdField)
++                            || (it is NarrowLiteralInstruction && it.narrowLiteral == dialogMenuLayoutId)
++                }
++            }.flatMap { instructions ->
++                sequenceOf(c.type) + instructions.asSequence()
++                    .filter { it.opcode == Opcode.NEW_INSTANCE }
++                    .map { ((it as ReferenceInstruction).reference as TypeReference).type }
++            }.mapNotNull { type -> type.toClassDefOrNull(context) }.firstOrNull { cls ->
++                cls.methods.any { m ->
++                    m.name == "onClick" && m.returnType == "V" && m.parameterTypes.size == 1
++                            && m.parameterTypes.first().toString() == "Landroid/view/View;"
++                }
++            }
++        } ?: throw PatchException("cache redirect: dialog menu click listener class not found")).let { c ->
+             val onClickOriginListenerType = "Lapp/revanced/bilibili/widget/OnClickOriginListener;"
+             c.proxy(context).run {
+                 interfaces.add(onClickOriginListenerType)
+@@ -75,9 +94,10 @@ object CacheRedirectPatch : MultiMethodBytecodePatch(
                  }.also { methods.add(it) }
              }
          }
@@ -1514,7 +2324,7 @@ index ba17488..40098bf 100644
              val originMethod = r.mutableMethod
              originMethod.cloneMutable(registerCount = 4, clearImplementation = true).apply {
                  originMethod.name += "_Origin"
-@@ -113,6 +116,27 @@ object CacheRedirectPatch : MultiMethodBytecodePatch(
+@@ -113,6 +133,27 @@ object CacheRedirectPatch : MultiMethodBytecodePatch(
                  )
              }.also { mutableClass.methods.add(it) }
          }
@@ -1543,7 +2353,7 @@ index ba17488..40098bf 100644
          UniteDownloadMenuInvokeFingerprint.result?.run {
              val originMethodName = mutableMethod.name + "_Origin"
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ForbidLiveRoomAutoFloatPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ForbidLiveRoomAutoFloatPatch.kt
-index e56d221..38b2e91 100644
+index e56d2211..38b2e915 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ForbidLiveRoomAutoFloatPatch.kt
 +++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ForbidLiveRoomAutoFloatPatch.kt
 @@ -15,6 +15,10 @@ import app.revanced.patches.bilibili.utils.isNative
@@ -1671,7 +2481,7 @@ index e56d221..38b2e91 100644
      }
  }
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ForceCommentNavigablePatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ForceCommentNavigablePatch.kt
-index cbe1c8b..78500de 100644
+index cbe1c8b3..a844dbe1 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ForceCommentNavigablePatch.kt
 +++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ForceCommentNavigablePatch.kt
 @@ -14,6 +14,10 @@ import app.revanced.patches.bilibili.utils.classDescriptor
@@ -1685,7 +2495,7 @@ index cbe1c8b..78500de 100644
  import com.android.tools.smali.dexlib2.iface.reference.FieldReference
  
  @Patch(
-@@ -39,12 +43,30 @@ object ForceCommentNavigablePatch : BytecodePatch(fingerprints = setOf(CommentCo
+@@ -39,28 +43,77 @@ object ForceCommentNavigablePatch : BytecodePatch(fingerprints = setOf(CommentCo
          """.trimIndent()
          ) ?: throw PatchException("not found PrimaryCommentMainFragment")
          CommentConfigFingerprint.result?.run {
@@ -1714,44 +2524,350 @@ index cbe1c8b..78500de 100644
                      inst.getReference<FieldReference>()
                  } else null
 -            }
+-            mutableClass.methods.first { m ->
 +            } ?: throw PatchException("not found seekEnabled field")
-             mutableClass.methods.first { m ->
++            val seekEnabledGetter = mutableClass.methods.firstOrNull { m ->
                  m.parameterTypes.isEmpty() && m.returnType == "Z" && !m.accessFlags.isAbstract()
                          && m.getInstruction(0).let {
+                     if (it.opcode == Opcode.IGET_BOOLEAN) it.getReference<FieldReference>() else null
+                 } == seekEnabledField
+-            }.addInstructionsWithLabels(
+-                0, """
+-                invoke-static {}, $patchType->enabled()Z
+-                move-result v0
+-                if-eqz v0, :jump
+-                const/4 v0, 0x1
+-                return v0
+-                :jump
+-                nop
+-            """.trimIndent()
+-            )
++            }
++            if (seekEnabledGetter != null) {
++                seekEnabledGetter.addInstructionsWithLabels(
++                    0, """
++                    invoke-static {}, $patchType->enabled()Z
++                    move-result v0
++                    if-eqz v0, :jump
++                    const/4 v0, 0x1
++                    return v0
++                    :jump
++                    nop
++                """.trimIndent()
++                )
++            } else {
++                // 9.12.0：R8 把数据类的属性 getter 全内联掉了，CommentConfig(Lhl/g;) 只剩
++                // <init>/copy/equals/hashCode/toString，没有 getSeekEnabled()Z 可钩，
++                // 所有读点都变成直接 iget-boolean 字段。
++                // 改为在字段唯一的写入点（构造器的 iput-boolean）上做 `orig || enabled()`，
++                // 与原来钩 getter（开关开则 true，否则原值）语义一致。
++                // 只复用这条 iput 自己的值寄存器，不新增寄存器、不动 registerCount。
++                var patched = false
++                for (ctor in mutableClass.methods.filter { it.name == "<init>" }) {
++                    val ctorInstructions = ctor.getInstructions()
++                    val putIndex = ctorInstructions.indexOfFirst {
++                        it.opcode == Opcode.IPUT_BOOLEAN
++                                && it.getReference<FieldReference>() == seekEnabledField
++                    }
++                    if (putIndex < 0) continue
++                    val register = (ctorInstructions[putIndex] as TwoRegisterInstruction).registerA
++                    ctor.addInstructionsWithLabels(
++                        putIndex, """
++                        if-nez v$register, :keep
++                        invoke-static {}, $patchType->enabled()Z
++                        move-result v$register
++                        :keep
++                        nop
++                    """.trimIndent()
++                    )
++                    patched = true
++                }
++                if (!patched) throw PatchException("not found seekEnabled getter or field write")
++            }
+         }
+     }
+ }
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ModulePreDownloadHookPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ModulePreDownloadHookPatch.kt
+index 462ceeb7..b908737c 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ModulePreDownloadHookPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/ModulePreDownloadHookPatch.kt
+@@ -8,6 +8,8 @@ import app.revanced.patcher.patch.annotation.Patch
+ import app.revanced.patches.bilibili.misc.other.fingerprints.ConfigV3PreloadFingerprint
+ import app.revanced.patches.bilibili.misc.other.fingerprints.WebConfigFingerprint
+ import app.revanced.util.exception
++import com.android.tools.smali.dexlib2.Opcode
++import com.android.tools.smali.dexlib2.iface.instruction.OneRegisterInstruction
+ 
+ @Patch(
+     name = "Prevent pre download module",
+@@ -31,16 +33,24 @@ object ModulePreDownloadHookPatch : BytecodePatch(setOf(ConfigV3PreloadFingerpri
+         """.trimIndent()
+         ) ?: throw ConfigV3PreloadFingerprint.exception
+         // prevent pre download small app engine
+-        WebConfigFingerprint.result?.mutableMethod?.addInstructionsWithLabels(
+-            0, """
+-            invoke-static {}, Lapp/revanced/bilibili/patches/SettingsTransfer;->delayDownloadModules()Z
+-            move-result v0
+-            if-eqz v0, :jump
+-            const/4 v0, 0x1
+-            return v0
+-            :jump
+-            nop
+-        """.trimIndent()
+-        ) ?: throw WebConfigFingerprint.exception
++        // 9.12.0 起 force_webview 的读取被内联进 AppRuntime.Q(Z)V，没有独立的 ()Z 可以整体 return true，
++        // 改为在那次 SharedPreferences.getBoolean("force_webview", false) 之后把结果与开关取或，语义等价。
++        WebConfigFingerprint.result?.run {
++            val stringIndex = scanResult.stringsScanResult!!.matches
++                .first { it.string == "force_webview" }.index
++            val instructions = mutableMethod.implementation!!.instructions
++            val moveResultIndex = (stringIndex..instructions.lastIndex)
++                .first { instructions[it].opcode == Opcode.MOVE_RESULT }
++            val register = (instructions[moveResultIndex] as OneRegisterInstruction).registerA
++            mutableMethod.addInstructionsWithLabels(
++                moveResultIndex + 1, """
++                if-nez v$register, :already_web
++                invoke-static {}, Lapp/revanced/bilibili/patches/SettingsTransfer;->delayDownloadModules()Z
++                move-result v$register
++                :already_web
++                nop
++            """.trimIndent()
++            )
++        } ?: throw WebConfigFingerprint.exception
+     }
+ }
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/NumberFormatPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/NumberFormatPatch.kt
+index b0293cc3..4b6a6927 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/NumberFormatPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/NumberFormatPatch.kt
+@@ -28,11 +28,11 @@ object NumberFormatPatch : BytecodePatch(
+         val mineBindMethod = numberFormatPatchClass.methods.first { it.name == "onMineBindAccountState" }
+         val spaceBindMethod = numberFormatPatchClass.methods.first { it.name == "onSpaceBindAccountState" }
+         MineBindAccountStateFingerprint.result?.run {
+-            mutableMethod.cloneMutable(registerCount = 3, clearImplementation = true).apply {
++            mutableMethod.cloneMutable(registerCount = 2, clearImplementation = true).apply {
+                 mutableMethod.name += "_Origin"
+                 addInstructions(
+                     """
+-                    invoke-direct {p0, p1, p2}, $mutableMethod
++                    invoke-static {p0, p1}, $mutableMethod
+                     invoke-static {p0, p1}, $mineBindMethod
+                     return-void
+                 """.trimIndent()
+@@ -44,7 +44,7 @@ object NumberFormatPatch : BytecodePatch(
+                 mutableMethod.name += "_Origin"
+                 addInstructions(
+                     """
+-                    invoke-direct {p0, p1}, $mutableMethod
++                    invoke-virtual {p0, p1}, $mutableMethod
+                     invoke-static {p0, p1}, $spaceBindMethod
+                     return-void
+                 """.trimIndent()
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/TrialQualityPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/TrialQualityPatch.kt
-index 2b19c16..21947ca 100644
+index 2b19c16c..ea9d4120 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/TrialQualityPatch.kt
 +++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/other/patch/TrialQualityPatch.kt
-@@ -25,19 +25,21 @@ object TrialQualityPatch : MultiMethodBytecodePatch(
+@@ -6,8 +6,13 @@ import app.revanced.patcher.patch.annotation.CompatiblePackage
+ import app.revanced.patcher.patch.annotation.Patch
+ import app.revanced.patches.bilibili.misc.other.fingerprints.QualityViewHolderFingerprint
+ import app.revanced.patches.bilibili.patcher.patch.MultiMethodBytecodePatch
+-import app.revanced.patches.bilibili.utils.cloneMutable
+ import app.revanced.patches.bilibili.utils.exception
++import com.android.tools.smali.dexlib2.Opcode
++import com.android.tools.smali.dexlib2.iface.instruction.FiveRegisterInstruction
++import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
++import com.android.tools.smali.dexlib2.iface.instruction.TwoRegisterInstruction
++import com.android.tools.smali.dexlib2.iface.reference.FieldReference
++import com.android.tools.smali.dexlib2.iface.reference.MethodReference
+ 
+ @Patch(
+     name = "Trial quality",
+@@ -25,24 +30,54 @@ object TrialQualityPatch : MultiMethodBytecodePatch(
          super.execute(context)
          val patchMethod = context.findClass("Lapp/revanced/bilibili/patches/TrialQualityPatch;")!!
              .mutableClass.methods.first { it.name == "onBindOnline" }
 -        QualityViewHolderFingerprint.result.associate { r ->
 -            r.mutableClass.methods to r.mutableClass.methods.first { m ->
 -                m.parameterTypes.let { it.size == 5 && it[1] == "Z" && it[3] == "Landroid/widget/TextView;" && it[4] == "Landroid/widget/TextView;" }
--            }
-+        QualityViewHolderFingerprint.result.distinctBy { it.classDef.type }.mapNotNull { r ->
-+            r.mutableClass.methods.firstOrNull { m ->
-+                // 8.92.x appends a QualityItemStyle parameter
-+                m.parameterTypes.let { (it.size == 5 || it.size == 6) && it[1] == "Z" && it[3] == "Landroid/widget/TextView;" && it[4] == "Landroid/widget/TextView;" }
-+            }?.let { r.mutableClass.methods to it }
-         }.ifEmpty {
-             throw QualityViewHolderFingerprint.exception
-         }.forEach { (methods, method) ->
-             val originMethod = method.cloneMutable(name = method.name + "_Origin")
-                 .also { methods.add(it) }
++        // 8.92.x: ViewHolder(quality/z0) 里有独立的 p0(PlayIndex,Z,Z,TextView,TextView[,QualityItemStyle])，整体换掉即可。
++        // 9.12.0: ViewHolder(quality/Q) 只剩 <clinit> 和 <init>，p0/r0 全被内联进 adapter(quality/h0) 的
++        //         onBindViewHolder，已经没有可整体替换的方法，改成在内联 p0 的收敛点插一条 invoke-static。
++        var patched = false
++        QualityViewHolderFingerprint.result.distinctBy { it.classDef.type }.forEach { r ->
++            val method = r.mutableMethod
++            val instructions = method.implementation?.instructions?.toList() ?: return@forEach
++            // 内联后的 p0 里有且只有两次 TextView.setContentDescription：
++            // 先是实心角标分支（boolValue == true），再是描边角标分支
++            val descIndices = instructions.withIndex().filter { (_, instruction) ->
++                instruction.opcode == Opcode.INVOKE_VIRTUAL &&
++                        ((instruction as? ReferenceInstruction)?.reference as? MethodReference)?.let {
++                            it.definingClass == "Landroid/widget/TextView;" && it.name == "setContentDescription"
++                        } == true
++            }.map { it.index }
++            if (descIndices.size != 2) return@forEach
++            val solidRegister = (instructions[descIndices[0]] as FiveRegisterInstruction).registerC
++            val strokeRegister = (instructions[descIndices[1]] as FiveRegisterInstruction).registerC
++            if (solidRegister == strokeRegister) return@forEach
++            // 内联 p0 结束、内联 r0 开始的位置：方法里第一条读取 ImageView 字段的 iget-object
++            val anchorIndex = instructions.indexOfFirst { instruction ->
++                instruction.opcode == Opcode.IGET_OBJECT &&
++                        ((instruction as? ReferenceInstruction)?.reference as? FieldReference)
++                            ?.type == "Landroid/widget/ImageView;"
+             }
+-        }.ifEmpty {
+-            throw QualityViewHolderFingerprint.exception
+-        }.forEach { (methods, method) ->
+-            val originMethod = method.cloneMutable(name = method.name + "_Origin")
+-                .also { methods.add(it) }
 -            method.also { methods.remove(it) }.cloneMutable(registerCount = 6, clearImplementation = true).apply {
-+            val lastParam = method.parameterTypes.size
-+            method.also { methods.remove(it) }.cloneMutable(registerCount = lastParam + 1, clearImplementation = true).apply {
-                 addInstructions(
-                     """
+-                addInstructions(
+-                    """
 -                    invoke-direct/range {p0 .. p5}, $originMethod
-+                    invoke-direct/range {p0 .. p$lastParam}, $originMethod
-                     invoke-static {p2, p4, p5}, $patchMethod
-                     return-void
+-                    invoke-static {p2, p4, p5}, $patchMethod
+-                    return-void
++            if (anchorIndex <= descIndices[1] || anchorIndex + 1 >= instructions.size) return@forEach
++            val holderRegister = (instructions[anchorIndex] as TwoRegisterInstruction).registerB
++            val next = instructions[anchorIndex + 1]
++            // 紧随其后必须是 iget-object：既保证插入点后面不是 move-result（不会拆散 invoke/move-result），
++            // 又能借它的目的寄存器当临时寄存器（那个值在插入点上是死的，下一条就会被覆写）
++            if (next.opcode != Opcode.IGET_OBJECT) return@forEach
++            val tempRegister = (next as TwoRegisterInstruction).registerA
++            if (listOf(solidRegister, strokeRegister, holderRegister, tempRegister).any { it > 15 }) return@forEach
++            // 必须插在收敛点 anchorIndex 的「下一条」指令之前：dexlib2 的
++            // MutableMethodImplementation.addInstruction(index, …) 只给新指令建一个空的 MethodLocation，
++            // 不会把 index 处原有的 label 搬过去，所以插在 anchorIndex 会让三条 goto 分支落到原指令、
++            // 直接绕过注入的代码。anchorIndex+1 处本来没有 label，两种 label 语义下都正确。
++            method.addInstructions(
++                anchorIndex + 1,
++                """
++                iget-object v$tempRegister, v$holderRegister, Landroidx/recyclerview/widget/RecyclerView${'$'}ViewHolder;->itemView:Landroid/view/View;
++                invoke-virtual {v$tempRegister}, Landroid/view/View;->isSelected()Z
++                move-result v$tempRegister
++                invoke-static {v$tempRegister, v$strokeRegister, v$solidRegister}, $patchMethod
                  """.trimIndent()
+-                )
+-            }.also { methods.add(it) }
++            )
++            patched = true
+         }
++        if (!patched) throw QualityViewHolderFingerprint.exception
+     }
+ }
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/protobuf/patch/MossPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/protobuf/patch/MossPatch.kt
+index 50e5fd3e..e951f07d 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/protobuf/patch/MossPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/protobuf/patch/MossPatch.kt
+@@ -32,15 +32,22 @@ object MossPatch : BytecodePatch(setOf(MossServiceFingerprint, MossMiddlewareGai
+             methods.find { it.name == "blockingUnaryCall" }?.run {
+                 val implementation = implementation ?: return@run
+ 
+-                // Since 8.92.1, the KMP engine branch returns its response before reaching the
+-                // legacy engine tail below. Hook that successful return explicitly as well.
++                // Up to 8.92.1 the method ended with an interface call into the legacy moss
++                // engine. Since 9.12.0 (build 9120300) that branch is gone and the KMP engine
++                // call is the only tail call, so there is no INVOKE_INTERFACE left to anchor on.
++                val legacyInvoke = implementation.instructions.lastOrNull {
++                    it.opcode == Opcode.INVOKE_INTERFACE
++                } as? Instruction35c
++
++                // While the legacy tail still exists, the KMP engine branch returns its response
++                // before reaching it, so hook that successful return explicitly as well.
+                 val kmpInvokeIndex = implementation.instructions.indexOfFirst { instruction ->
+                     val reference = (instruction as? ReferenceInstruction)?.reference
+                             as? MethodReference
+                     reference?.definingClass == "Lcom/bilibili/lib/moss/api/KMossServiceImp;"
+                             && reference.name == "blockingUnaryCall"
+                 }
+-                if (kmpInvokeIndex != -1) {
++                if (legacyInvoke != null && kmpInvokeIndex != -1) {
+                     val moveResult = implementation.instructions.getOrNull(kmpInvokeIndex + 1)
+                             as? OneRegisterInstruction
+                         ?: throw MossServiceFingerprint.exception
+@@ -79,9 +86,19 @@ object MossPatch : BytecodePatch(setOf(MossServiceFingerprint, MossMiddlewareGai
+                     nop
+                 """.trimIndent()
+                 )
+-                val invokeInst = implementation.instructions.findLast {
+-                    it.opcode == Opcode.INVOKE_INTERFACE
+-                } as Instruction35c
++                val tailInvoke = legacyInvoke ?: (implementation.instructions.lastOrNull { instruction ->
++                    val reference = (instruction as? ReferenceInstruction)?.reference
++                            as? MethodReference
++                    reference != null
++                            && reference.definingClass == "Lcom/bilibili/lib/moss/api/KMossServiceImp;"
++                            && reference.name == "blockingUnaryCall"
++                } as? Instruction35c ?: throw MossServiceFingerprint.exception)
++                val tailOpcode = tailInvoke.opcode
++                val tailInvokeName = when (tailOpcode) {
++                    Opcode.INVOKE_INTERFACE -> "invoke-interface"
++                    Opcode.INVOKE_VIRTUAL -> "invoke-virtual"
++                    else -> throw MossServiceFingerprint.exception
++                }
+                 removeInstructions(implementation.instructions.size - 3, 3)
+                 addInstructionsWithLabels(
+                     implementation.instructions.size,
+@@ -89,7 +106,7 @@ object MossPatch : BytecodePatch(setOf(MossServiceFingerprint, MossMiddlewareGai
+                     const/4 v1, 0x0
+                     const/4 v2, 0x0
+                     #:try_start
+-                    invoke-interface {v0, p1, p2, p3}, ${invokeInst.reference}
++                    ${tailInvokeName} {v0, p1, p2, p3}, ${tailInvoke.reference}
+                     move-result-object p1
+                     #:try_end
+                     #.catch Lcom/bilibili/lib/moss/api/MossException; {:try_start .. :try_end} :catch
+@@ -108,7 +125,7 @@ object MossPatch : BytecodePatch(setOf(MossServiceFingerprint, MossMiddlewareGai
+                 """.trimIndent()
+                 )
+                 val invokeIndex = implementation.instructions.indexOfLast {
+-                    it.opcode == Opcode.INVOKE_INTERFACE
++                    it.opcode == tailOpcode
+                 }
+                 val moveExceptionIndex = implementation.instructions.indexOfLast {
+                     it.opcode == Opcode.MOVE_EXCEPTION
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/settings/fingerprints/PreferenceManagerFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/settings/fingerprints/PreferenceManagerFingerprint.kt
+index 6b858275..276a7c90 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/settings/fingerprints/PreferenceManagerFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/settings/fingerprints/PreferenceManagerFingerprint.kt
+@@ -4,6 +4,9 @@ import app.revanced.patcher.fingerprint.MethodFingerprint
+ 
+ object PreferenceManagerFingerprint : MethodFingerprint(
+     strings = listOf("_has_set_default_values"),
+-    parameters = listOf("Landroid/content/Context;", "Ljava/lang/String;", "I", "I", "Z"),
++    // 9.12.0(9120300)：R8 把 PreferenceManager.setDefaultValues 做了参数特化，
++    // sharedPreferencesName/mode/readAgain 被常量折叠，只剩
++    // Landroidx/preference/g;->d(ILandroid/content/Context;)V
++    parameters = listOf("I", "Landroid/content/Context;"),
+     returnType = "V"
+ )
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/settings/patch/FixPreferenceManagerPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/settings/patch/FixPreferenceManagerPatch.kt
+index bf534195..a03d6a26 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/settings/patch/FixPreferenceManagerPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/settings/patch/FixPreferenceManagerPatch.kt
+@@ -9,6 +9,7 @@ import app.revanced.patcher.util.proxy.mutableTypes.MutableMethodParameter.Compa
+ import app.revanced.patches.bilibili.misc.settings.fingerprints.PreferenceManagerFingerprint
+ import app.revanced.patches.bilibili.utils.MethodParameter
+ import app.revanced.patches.bilibili.utils.cloneMutable
++import app.revanced.patches.bilibili.utils.removeFinal
+ import app.revanced.util.exception
+ 
+ /**
+@@ -60,6 +61,14 @@ object FixPreferenceManagerPatch : BytecodePatch(setOf(PreferenceManagerFingerpr
+         val getSharedPreferencesMethod = preferenceManagerDef.methods.first {
+             it.parameters.isEmpty() && it.returnType == "Landroid/content/SharedPreferences;"
+         }
++        // 9.12.0(9120300)：R8 把 PreferenceManager(Landroidx/preference/g;) 的虚方法全标成了 final
++        // （8.92.1 的 androidx/preference/e->m() 还是 acc=0x0001 非 final）。
++        // ModulePreferenceManager 继承它之后同名覆写 b()，会在类加载期抛
++        // LinkageError "overrides final method"，所以先清掉 ACC_FINAL。
++        PreferenceManagerFingerprint.result!!.mutableClass.methods.first {
++            it.name == getSharedPreferencesMethod.name && it.parameters.isEmpty()
++                    && it.returnType == "Landroid/content/SharedPreferences;"
++        }.apply { accessFlags = accessFlags.removeFinal() }
+         val modulePrefsManagerClass =
+             context.findClass("Lapp/revanced/bilibili/settings/ModulePreferenceManager;")!!.mutableClass
+         modulePrefsManagerClass.setSuperClass(preferenceManagerDef.type)
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/settings/patch/SettingsResourcePatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/settings/patch/SettingsResourcePatch.kt
-index 4de8d01..5da8c55 100644
+index 4de8d01f..5da8c552 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/settings/patch/SettingsResourcePatch.kt
 +++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/settings/patch/SettingsResourcePatch.kt
 @@ -62,6 +62,8 @@ object SettingsResourcePatch : ResourcePatch() {
@@ -1763,8 +2879,333 @@ index 4de8d01..5da8c55 100644
          "biliroaming_setting_subtitle_translate_server.xml",
          "biliroaming_setting_external_downloader.xml",
          "biliroaming_setting_story_ui_style.xml",
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/theme/fingerprints/SkinListFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/theme/fingerprints/SkinListFingerprint.kt
+index bdac98f7..b0101557 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/theme/fingerprints/SkinListFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/theme/fingerprints/SkinListFingerprint.kt
+@@ -2,10 +2,15 @@ package app.revanced.patches.bilibili.misc.theme.fingerprints
+ 
+ import app.revanced.patcher.fingerprint.MethodFingerprint
+ 
++/**
++ * 9.12.0: 方法从 (BiliSkinList, Z)V 变成了 (BiliSkinList)V，尾巴上那个 boolean 没了。
++ * 补丁只用得到 p1，所以只锁第一个参数，两种签名都能命中；
++ * ThemeStoreActivity 里以 BiliSkinList 打头的方法全包只有这一个。
++ */
+ object SkinListFingerprint : MethodFingerprint(
+     returnType = "V",
+-    parameters = listOf("Ltv/danmaku/bili/ui/theme/api/BiliSkinList;", "Z"),
+-    customFingerprint = { _, classDef ->
++    customFingerprint = { methodDef, classDef ->
+         classDef.type == "Ltv/danmaku/bili/ui/theme/ThemeStoreActivity;"
++                && methodDef.parameterTypes.firstOrNull() == "Ltv/danmaku/bili/ui/theme/api/BiliSkinList;"
+     }
+ )
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/theme/fingerprints/ThemeHelperFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/theme/fingerprints/ThemeHelperFingerprint.kt
+index 78398a41..e7cf9ccf 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/theme/fingerprints/ThemeHelperFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/theme/fingerprints/ThemeHelperFingerprint.kt
+@@ -1,9 +1,28 @@
+ package app.revanced.patches.bilibili.misc.theme.fingerprints
+ 
+ import app.revanced.patcher.fingerprint.MethodFingerprint
++import app.revanced.util.getReference
++import com.android.tools.smali.dexlib2.Opcode
++import com.android.tools.smali.dexlib2.iface.reference.StringReference
+ 
++// Since 9.12.0 R8 inlined the `private static int (Context)` helper that carried the
++// "theme_entries_last_key" string, so nothing matches strings + (Context)I anymore:
++// the string now only lives in `f(Landroid/content/Context;IZ)V` and
++// `h(Landroid/content/Context;)V`, both returning void.
++// Anchor on the class that still holds that string (LTq1/a; in 9.12.0) and pick the
++// (Context)I method whose name also names a SparseArray field of that class, because
++// CustomThemePatch reads the color table via `fields.first { it.name == method.name }`.
+ object ThemeHelperFingerprint : MethodFingerprint(
+-    strings = listOf("theme_entries_last_key"),
+     returnType = "I",
+-    parameters = listOf("Landroid/content/Context;")
++    parameters = listOf("Landroid/content/Context;"),
++    customFingerprint = { methodDef, classDef ->
++        classDef.fields.any {
++            it.name == methodDef.name && it.type == "Landroid/util/SparseArray;"
++        } && classDef.methods.any { m ->
++            m.implementation?.instructions?.any { inst ->
++                (inst.opcode == Opcode.CONST_STRING || inst.opcode == Opcode.CONST_STRING_JUMBO)
++                        && inst.getReference<StringReference>().string == "theme_entries_last_key"
++            } == true
++        }
++    }
+ )
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/theme/fingerprints/ThemeProcessorFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/theme/fingerprints/ThemeProcessorFingerprint.kt
+index 337b060e..26b4ee1b 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/theme/fingerprints/ThemeProcessorFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/theme/fingerprints/ThemeProcessorFingerprint.kt
+@@ -2,7 +2,14 @@ package app.revanced.patches.bilibili.misc.theme.fingerprints
+ 
+ import app.revanced.patcher.fingerprint.MethodFingerprint
+ 
++/**
++ * 9.12.0: 主题处理类里那个 (BiliSkinList)V 的方法被 R8 干掉了，按参数已经匹配不到。
++ * "theme2-account" 这个字符串在 4 个类里都有，但只有主题处理类本身带 BiliSkinList 字段，
++ * 用它来区分，新旧版本都成立。
++ */
+ object ThemeProcessorFingerprint : MethodFingerprint(
+     strings = listOf("theme2-account"),
+-    parameters = listOf("Ltv/danmaku/bili/ui/theme/api/BiliSkinList;")
++    customFingerprint = { _, classDef ->
++        classDef.fields.any { it.type == "Ltv/danmaku/bili/ui/theme/api/BiliSkinList;" }
++    }
+ )
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/theme/patch/CustomThemePatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/theme/patch/CustomThemePatch.kt
+index 555e72d7..8fffb747 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/theme/patch/CustomThemePatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/theme/patch/CustomThemePatch.kt
+@@ -4,6 +4,8 @@ import app.revanced.patcher.data.BytecodeContext
+ import app.revanced.patcher.extensions.InstructionExtensions.addInstructions
+ import app.revanced.patcher.extensions.InstructionExtensions.addInstructionsWithLabels
+ import app.revanced.patcher.patch.BytecodePatch
++import app.revanced.patcher.util.proxy.mutableTypes.MutableMethod
++import app.revanced.patcher.patch.PatchException
+ import app.revanced.patcher.patch.annotation.CompatiblePackage
+ import app.revanced.patcher.patch.annotation.Patch
+ import app.revanced.patches.bilibili.misc.theme.fingerprints.*
+@@ -11,6 +13,7 @@ import app.revanced.patches.bilibili.utils.*
+ import app.revanced.util.exception
+ import app.revanced.util.getReference
+ import com.android.tools.smali.dexlib2.Opcode
++import com.android.tools.smali.dexlib2.iface.reference.FieldReference
+ import com.android.tools.smali.dexlib2.iface.reference.MethodReference
+ 
+ @Patch(
+@@ -92,36 +95,103 @@ object CustomThemePatch : BytecodePatch(
+             }
+         } ?: throw BuiltInThemesFingerprint.exception
+ 
+-        ThemeColorsFingerprint.result?.mutableClass?.methods?.first {
+-            it.name == "<init>" && it.accessFlags.isPrivate()
+-        }?.let { method ->
+-            method.accessFlags = method.accessFlags.toPublic()
+-            val garbType = method.parameterTypes[0].toString()
+-            garbType.toClassDef(context).proxy(context).addDefaultConstructorIfNeeded()
+-            patchClass.methods.run {
+-                first { it.name == "newTheme" }.also { remove(it) }.cloneMutable(
+-                    registerCount = 35, clearImplementation = true
+-                ).apply {
+-                    addInstructions(
+-                        """
+-                        new-instance v0, ${method.definingClass}
+-                        move-object v1, v0
+-                        new-instance v2, $garbType
+-                        invoke-direct {v2}, $garbType-><init>()V
+-                        move-object/from16 v3, p0
+-                        move-wide/from16 v4, p1
+-                        move-wide/from16 v6, p3
+-                        move-wide/from16 v8, p5
+-                        move-wide/from16 v10, p7
+-                        move-wide/from16 v12, p9
+-                        move-wide/from16 v14, p11
+-                        move-wide/from16 v16, p13
+-                        move/from16 v18, p15
+-                        invoke-direct/range {v1 .. v18}, $method
+-                        return-object v0
+-                    """.trimIndent()
+-                    )
+-                }.also { add(it) }
++        ThemeColorsFingerprint.result?.mutableClass?.let { colorsClass ->
++            val fullCtor = colorsClass.methods.firstOrNull {
++                it.name == "<init>" && it.accessFlags.isPrivate() && it.parameterTypes.size >= 10
++            }
++            if (fullCtor != null) {
++                // <= 8.92.1：颜色是私有全参构造器的参数，直接转调
++                fullCtor.accessFlags = fullCtor.accessFlags.toPublic()
++                val garbType = fullCtor.parameterTypes[0].toString()
++                garbType.toClassDef(context).proxy(context).addDefaultConstructorIfNeeded()
++                patchClass.methods.run {
++                    first { it.name == "newTheme" }.also { remove(it) }.cloneMutable(
++                        registerCount = 35, clearImplementation = true
++                    ).apply {
++                        addInstructions(
++                            """
++                            new-instance v0, ${fullCtor.definingClass}
++                            move-object v1, v0
++                            new-instance v2, $garbType
++                            invoke-direct {v2}, $garbType-><init>()V
++                            move-object/from16 v3, p0
++                            move-wide/from16 v4, p1
++                            move-wide/from16 v6, p3
++                            move-wide/from16 v8, p5
++                            move-wide/from16 v10, p7
++                            move-wide/from16 v12, p9
++                            move-wide/from16 v14, p11
++                            move-wide/from16 v16, p13
++                            move/from16 v18, p15
++                            invoke-direct/range {v1 .. v18}, $fullCtor
++                            return-object v0
++                        """.trimIndent()
++                        )
++                    }.also { add(it) }
++                }
++            } else {
++                // 9.12.0：R8 把全参构造器整个内联进了 public 的 (GarbInfo, ThemeDayNight) 构造器，
++                // 颜色改成在构造器里从 GarbInfo 现算，不再是入参。
++                // 于是改成「先用两参构造器建对象，再把 8 个颜色字段直接写进去」。
++                val ctor = colorsClass.methods.first {
++                    it.name == "<init>" && it.parameterTypes.size == 2
++                }
++                ctor.accessFlags = ctor.accessFlags.toPublic()
++                val garbType = ctor.parameterTypes[0].toString()
++                garbType.toClassDef(context).proxy(context).addDefaultConstructorIfNeeded()
++                // 字段名被混淆，靠名字稳定的 getter 反查：getter 体内第一条 iget-wide 就是它
++                fun colorField(getterName: String) = colorsClass.methods.first {
++                    it.name == getterName
++                }.implementation!!.instructions.first {
++                    it.opcode == Opcode.IGET_WIDE
++                }.getReference<FieldReference>().name.let { name ->
++                    colorsClass.fields.first { it.name == name }
++                }
++                val primary = colorField("getPrimary-0d7_KjU")
++                val secondary = colorField("getSecondary-0d7_KjU")
++                val background = colorField("getBackground-0d7_KjU")
++                val textTitle = colorField("getTextTitle-0d7_KjU")
++                val textSubtitle = colorField("getTextSubtitle-0d7_KjU")
++                val textOther = colorField("getTextOther-0d7_KjU")
++                val actionIcon = colorField("getActionIcon-0d7_KjU")
++                val isPure = colorsClass.fields.first { it.type == "Z" }
++                // 跨类写字段，final 必须去掉，否则运行时 IllegalAccessError
++                listOf(
++                    primary, secondary, background, textTitle,
++                    textSubtitle, textOther, actionIcon, isPure
++                ).forEach { it.accessFlags = it.accessFlags.toPublic().removeFinal() }
++                patchClass.methods.run {
++                    first { it.name == "newTheme" }.also { remove(it) }.cloneMutable(
++                        registerCount = 35, clearImplementation = true
++                    ).apply {
++                        addInstructions(
++                            """
++                            new-instance v0, ${colorsClass.type}
++                            new-instance v1, $garbType
++                            invoke-direct {v1}, $garbType-><init>()V
++                            move-object/from16 v2, p0
++                            invoke-direct {v0, v1, v2}, $ctor
++                            move-wide/from16 v2, p1
++                            iput-wide v2, v0, $primary
++                            move-wide/from16 v2, p3
++                            iput-wide v2, v0, $secondary
++                            move-wide/from16 v2, p5
++                            iput-wide v2, v0, $background
++                            move-wide/from16 v2, p7
++                            iput-wide v2, v0, $textTitle
++                            move-wide/from16 v2, p9
++                            iput-wide v2, v0, $textSubtitle
++                            move-wide/from16 v2, p11
++                            iput-wide v2, v0, $textOther
++                            move-wide/from16 v2, p13
++                            iput-wide v2, v0, $actionIcon
++                            move/from16 v2, p15
++                            iput-boolean v2, v0, $isPure
++                            return-object v0
++                        """.trimIndent()
++                        )
++                    }.also { add(it) }
++                }
+             }
+         } ?: throw ThemeColorsFingerprint.exception
+ 
+@@ -151,27 +221,73 @@ object CustomThemePatch : BytecodePatch(
+         } ?: throw ThemeClickFingerprint.exception
+ 
+         val onThemeResetMethod = patchClass.methods.first { it.name == "onThemeReset" }
+-        ThemeProcessorFingerprint.result?.mutableClass?.methods?.filter { m ->
+-            m.parameterTypes.isEmpty() && m.accessFlags == 0 && m.returnType == "V"
+-        }?.forEach { m ->
+-            m.addInstructionsWithLabels(
+-                0, """
+-                invoke-static {}, $onThemeResetMethod
+-                move-result v0
+-                if-eqz v0, :jump
+-                return-void
+-                :jump
+-                nop
+-            """.trimIndent()
+-            )
++        fun MutableMethod.injectThemeResetGuard() = addInstructionsWithLabels(
++            0, """
++            invoke-static {}, $onThemeResetMethod
++            move-result v0
++            if-eqz v0, :jump
++            return-void
++            :jump
++            nop
++        """.trimIndent()
++        )
++        ThemeProcessorFingerprint.result?.mutableClass?.let { processorClass ->
++            val legacyTargets = processorClass.methods.filter { m ->
++                m.parameterTypes.isEmpty() && m.accessFlags == 0 && m.returnType == "V"
++            }
++            if (legacyTargets.isNotEmpty()) {
++                // <= 8.92.1：两个包私有的无参 void 方法，各自只负责通知宿主
++                legacyTargets.forEach { it.injectThemeResetGuard() }
++            } else {
++                // 9.12.0：R8 把那两个方法内联掉了，接口回调也被去虚化成了对宿主 Activity 的直接调用。
++                // 顺着「宿主回调字段」找到被直接调用的那个无参 void 方法，改钩它，语义等价。
++                val callbackTypePrefix = processorClass.type.dropLast(1) + "$"
++                val callbackFieldTypes = processorClass.fields
++                    .map { it.type }.filter { it.startsWith(callbackTypePrefix) }.toSet()
++                val targets = processorClass.methods.flatMap { m ->
++                    val instructions = m.implementation?.instructions?.toList().orEmpty()
++                    instructions.withIndex().mapNotNull { (index, instruction) ->
++                        if (instruction.opcode != Opcode.IGET_OBJECT) return@mapNotNull null
++                        if (instruction.getReference<FieldReference>().type !in callbackFieldTypes)
++                            return@mapNotNull null
++                        instructions.subList(index + 1, minOf(index + 7, instructions.size))
++                            .firstNotNullOfOrNull { next ->
++                                if (next.opcode == Opcode.INVOKE_VIRTUAL || next.opcode == Opcode.INVOKE_INTERFACE)
++                                    next.getReference<MethodReference>().takeIf {
++                                        it.parameterTypes.isEmpty() && it.returnType == "V"
++                                    } else null
++                            }
++                    }
++                }.distinct()
++                if (targets.isEmpty())
++                    throw PatchException("not found theme reset callback")
++                targets.forEach { reference ->
++                    context.findClass(reference.definingClass)?.mutableClass?.methods
++                        ?.firstOrNull { it.name == reference.name && it.parameterTypes.isEmpty() }
++                        ?.injectThemeResetGuard()
++                        ?: throw PatchException("not found theme reset callback impl: $reference")
++                }
++            }
+         } ?: throw ThemeProcessorFingerprint.exception
+ 
+-        WebActivityBuildUriFingerprint.result?.method?.implementation?.instructions?.firstNotNullOfOrNull { inst ->
+-            if (inst.opcode == Opcode.INVOKE_STATIC) inst.getReference<MethodReference>().let {
+-                if (it.parameterTypes.isEmpty() && it.returnType == "I") it.definingClass else null
+-            } else null
+-        }?.let { context.findClass(it) }?.mutableClass?.fields?.find {
+-            it.type == "Landroid/util/SparseArray;"
++        WebActivityBuildUriFingerprint.result?.method?.implementation?.instructions?.toList()?.let { instructions ->
++            // <= 8.92.1：主题 id 由一个无参 static int 方法给出，颜色表 SparseArray 就在它所在的类里
++            instructions.firstNotNullOfOrNull { inst ->
++                if (inst.opcode == Opcode.INVOKE_STATIC) inst.getReference<MethodReference>().let {
++                    if (it.parameterTypes.isEmpty() && it.returnType == "I") it.definingClass else null
++                } else null
++            }?.let { context.findClass(it) }?.mutableClass?.fields?.find {
++                it.type == "Landroid/util/SparseArray;"
++            } ?: run {
++                // 9.12.0：那个方法改成收 Context 了，不再无参；但颜色表在本方法里被直接 sget，顺手取
++                instructions.firstNotNullOfOrNull { inst ->
++                    if (inst.opcode == Opcode.SGET_OBJECT) inst.getReference<FieldReference>()
++                        .takeIf { it.type == "Landroid/util/SparseArray;" } else null
++                }?.let { reference ->
++                    context.findClass(reference.definingClass)?.mutableClass?.fields
++                        ?.firstOrNull { it.name == reference.name }
++                }
++            }
+         }?.let { field ->
+             field.accessFlags = field.accessFlags.toPublic().removeFinal()
+             patchClass.methods.run {
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/toast/patch/ToastPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/toast/patch/ToastPatch.kt
-index e470b8a..7cdc6bb 100644
+index e470b8a8..7cdc6bbe 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/toast/patch/ToastPatch.kt
 +++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/toast/patch/ToastPatch.kt
 @@ -22,23 +22,39 @@ import com.android.tools.smali.dexlib2.iface.reference.MethodReference
@@ -1822,8 +3263,90 @@ index e470b8a..7cdc6bb 100644
          myToastsClass.mutableClass.methods.run {
              first { it.name == "show" && it.parameterTypes.size == 4 }.also { remove(it) }
                  .cloneMutable(registerCount = 4, clearImplementation = true).apply {
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/fingerprints/PlaySpeedManagerImplFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/fingerprints/PlaySpeedManagerImplFingerprint.kt
+index 98d9469a..46cce5a0 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/fingerprints/PlaySpeedManagerImplFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/fingerprints/PlaySpeedManagerImplFingerprint.kt
+@@ -2,7 +2,9 @@ package app.revanced.patches.bilibili.video.player.fingerprints
+ 
+ import app.revanced.patcher.fingerprint.MethodFingerprint
+ import com.android.tools.smali.dexlib2.Opcode
++import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
+ import com.android.tools.smali.dexlib2.iface.instruction.formats.Instruction21ih
++import com.android.tools.smali.dexlib2.iface.reference.MethodReference
+ 
+ object PlaySpeedManagerImplFingerprint : MethodFingerprint(
+     returnType = "V",
+@@ -10,7 +12,7 @@ object PlaySpeedManagerImplFingerprint : MethodFingerprint(
+     customFingerprint = { methodDef, classDef ->
+         (methodDef.name == "<init>") && classDef.run {
+             superclass == "Ljava/lang/Object;" && interfaces.size == 1
+-                    && methods.count { it.parameterTypes.isEmpty() && it.returnType == "F" } == 2
++                    && methods.count { it.parameterTypes.isEmpty() && it.returnType == "F" } == 1
+         } && run {
+             val instructions = methodDef.implementation!!.instructions.toList()
+             (instructions.take(4).map { it.opcode } == listOf(
+@@ -19,6 +21,9 @@ object PlaySpeedManagerImplFingerprint : MethodFingerprint(
+                 Opcode.INVOKE_STATIC,
+                 Opcode.MOVE_RESULT_OBJECT,
+             )) && (instructions[1] as Instruction21ih).wideLiteral == 0x3f800000L
++                    && ((instructions[2] as ReferenceInstruction).reference as MethodReference).let {
++                        it.definingClass == "Ljava/lang/Float;" && it.name == "valueOf"
++                    }
+         }
+     }
+ )
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/fingerprints/PlayerGestureListenerFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/fingerprints/PlayerGestureListenerFingerprint.kt
+index e0aa11ac..385a2df3 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/fingerprints/PlayerGestureListenerFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/fingerprints/PlayerGestureListenerFingerprint.kt
+@@ -11,7 +11,8 @@ object PlayerGestureListenerFingerprint : MethodFingerprint(
+         Opcode.IF_EQZ,
+         Opcode.IGET_BOOLEAN,
+         Opcode.IF_EQZ,
+-        Opcode.INVOKE_INTERFACE,
++        // 9.12.0: 回调目标从接口变成了具体类，invoke-interface -> invoke-virtual，这里放成通配
++        null,
+         Opcode.CONST_4,
+         Opcode.IPUT_BOOLEAN,
+         Opcode.RETURN_VOID,
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/fingerprints/PlayerSettingCreateSpeedFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/fingerprints/PlayerSettingCreateSpeedFingerprint.kt
+index 84032a78..ce262bc0 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/fingerprints/PlayerSettingCreateSpeedFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/fingerprints/PlayerSettingCreateSpeedFingerprint.kt
+@@ -1,12 +1,27 @@
+ package app.revanced.patches.bilibili.video.player.fingerprints
+ 
+ import app.revanced.patcher.fingerprint.MethodFingerprint
++import com.android.tools.smali.dexlib2.AccessFlags
+ 
++/**
++ * The speed entry of the in-player setting panel.
++ *
++ * 9.12.0: `PlayerSettingFunctionWidget2.B(Lcom/bilibili/playerbizcommonv2/utils/s;
++ * Lcom/bilibili/playerbizcommonv2/widget/setting/PlayerSettingFunctionWidget2;
++ * Ljava/lang/String;)Lkotlin/Unit;`, a static lambda whose last parameter is the
++ * speed text ("1.25"); it reports option/speed/value and then calls setPlaySpeed.
++ *
++ * Note: on 8.92.1 that code was already `static Unit c1(PlayerSettingFunctionWidget2,
++ * String)`, so the previous `parameters = listOf()` / `returnType = "V"` fingerprint
++ * (which expected a no-arg void Kotlin lambda holding the speed in a String field)
++ * did not resolve there either - the patch got through on the
++ * `isPink && UniteMenuSpeedClickFingerprint.result == null` fallback.
++ */
+ object PlayerSettingCreateSpeedFingerprint : MethodFingerprint(
+     strings = listOf("option", "speed", "value"),
+-    parameters = listOf(),
+-    returnType = "V",
++    parameters = listOf("L", "L", "Ljava/lang/String;"),
++    returnType = "Lkotlin/Unit;",
+     customFingerprint = { methodDef, _ ->
+-        methodDef.name != "<clinit>"
++        AccessFlags.STATIC.isSet(methodDef.accessFlags)
+     }
+ )
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/HwCodecPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/HwCodecPatch.kt
-index 0be7bdd..c643c9c 100644
+index 0be7bdde..c643c9c8 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/HwCodecPatch.kt
 +++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/HwCodecPatch.kt
 @@ -4,13 +4,15 @@ import app.revanced.patcher.data.BytecodeContext
@@ -1933,11 +3456,82 @@ index 0be7bdd..c643c9c 100644
 +        }
      }
  }
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/LongPressPlaybackSpeedPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/LongPressPlaybackSpeedPatch.kt
+index 832848f4..04bcd775 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/LongPressPlaybackSpeedPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/LongPressPlaybackSpeedPatch.kt
+@@ -27,7 +27,10 @@ object LongPressPlaybackSpeedPatch : MultiMethodBytecodePatch(
+ ) {
+     override fun execute(context: BytecodeContext) {
+         super.execute(context)
+-        TripleSpeedServiceFingerprint.result.mapNotNull { r ->
++        // 9.12.0(9120300) 起 com.mall.videodetail.vd.united.player.TripleSpeedService(老链路)整包被移除，
++        // 全 app 仅剩 ship.theseus 的 unite 链路带 "player.player.gesture.speedup.player"，
++        // 故老链路无命中不再视为失败，只有两条链路都没命中才报错。
++        val oldMethods = TripleSpeedServiceFingerprint.result.mapNotNull { r ->
+             r.method.implementation!!.instructions.firstNotNullOfOrNull { inst ->
+                 if (inst is Instruction35c && inst.opcode == Opcode.INVOKE_DIRECT) {
+                     (inst.reference as MethodReference).takeIf {
+@@ -35,9 +38,8 @@ object LongPressPlaybackSpeedPatch : MultiMethodBytecodePatch(
+                     }
+                 } else null
+             }?.let { r.mutableClass.methods.first { m -> m == it } }
+-        }.ifEmpty {
+-            throw TripleSpeedServiceFingerprint.exception
+-        }.forEach {
++        }
++        oldMethods.forEach {
+             it.addInstructions(
+                 0, """
+                 invoke-static {p1}, Lapp/revanced/bilibili/patches/PlaybackSpeedPatch;->longPressSpeed(F)F
+@@ -45,13 +47,16 @@ object LongPressPlaybackSpeedPatch : MultiMethodBytecodePatch(
+             """.trimIndent()
+             )
+         }
+-        TripleSpeedServiceUniteFingerprint.result?.mutableClass?.methods?.first { m ->
++        val uniteMethod = TripleSpeedServiceUniteFingerprint.result?.mutableClass?.methods?.firstOrNull { m ->
+             m.name == "<init>" && m.parameterTypes.let { it.size == 4 && it[1] == "F" }
+-        }?.addInstructions(
++        }
++        uniteMethod?.addInstructions(
+             0, """
+             invoke-static {p2}, Lapp/revanced/bilibili/patches/PlaybackSpeedPatch;->longPressSpeed(F)F
+             move-result p2
+         """.trimIndent()
+         )
++        if (oldMethods.isEmpty() && uniteMethod == null)
++            throw TripleSpeedServiceFingerprint.exception
+     }
+ }
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/PlayerToastPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/PlayerToastPatch.kt
+index 8b0df64e..4f29271b 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/PlayerToastPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/PlayerToastPatch.kt
+@@ -35,7 +35,10 @@ object PlayerToastPatch : BytecodePatch(setOf(ShowPlayerToastFingerprint)) {
+             showToastMethodName = mutableClass.methods.first { m ->
+                 m.accessFlags.let { !it.isStatic() && it.isPublic() }
+                         && (m.implementation?.instructions?.any { inst ->
+-                    inst.opcode == Opcode.INVOKE_DIRECT && (inst as BuilderInstruction35c).reference == mutableMethod
++                    // 9.12.0: 真正干活的那个方法从 private 变成了 public final，
++                    // 调用点也就从 invoke-direct 变成了 invoke-virtual
++                    (inst.opcode == Opcode.INVOKE_DIRECT || inst.opcode == Opcode.INVOKE_VIRTUAL)
++                            && (inst as BuilderInstruction35c).reference == mutableMethod
+                 } ?: false)
+             }.name
+             mutableMethod.addInstructionsWithLabels(
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/RememberPlaybackSpeedPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/RememberPlaybackSpeedPatch.kt
-index 57f3c15..fb86a3d 100644
+index 57f3c15d..f1d7faf9 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/RememberPlaybackSpeedPatch.kt
 +++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/player/patch/RememberPlaybackSpeedPatch.kt
-@@ -29,6 +29,7 @@ object RememberPlaybackSpeedPatch : MultiMethodBytecodePatch(
+@@ -11,6 +11,7 @@ import app.revanced.patches.bilibili.video.player.fingerprints.*
+ import app.revanced.util.exception
+ import app.revanced.util.getReference
+ import com.android.tools.smali.dexlib2.Opcode
++import com.android.tools.smali.dexlib2.iface.instruction.FiveRegisterInstruction
+ import com.android.tools.smali.dexlib2.iface.instruction.OneRegisterInstruction
+ import com.android.tools.smali.dexlib2.iface.reference.MethodReference
+ 
+@@ -29,6 +30,7 @@ object RememberPlaybackSpeedPatch : MultiMethodBytecodePatch(
          PlayerSettingCreateSpeedFingerprint,
          MenuServiceCreateSpeedFingerprint,
          MenuFuncSegmentFingerprint,
@@ -1945,7 +3539,32 @@ index 57f3c15..fb86a3d 100644
      ),
      multiFingerprints = setOf(PlayerSpeedChooseWidgetFingerprint, PlaybackSpeedSettingFingerprint),
  ) {
-@@ -54,7 +55,7 @@ object RememberPlaybackSpeedPatch : MultiMethodBytecodePatch(
+@@ -43,18 +45,24 @@ object RememberPlaybackSpeedPatch : MultiMethodBytecodePatch(
+             """.trimIndent()
+             )
+         }
+-        PlayerSettingCreateSpeedFingerprint.result?.run {
+-            val speedField = mutableClass.fields.first { it.type == "Ljava/lang/String;" }
+-            mutableMethod.addInstructions(
+-                0, """
+-                iget-object v0, p0, $speedField
+-                invoke-static {v0}, Ljava/lang/Float;->parseFloat(Ljava/lang/String;)F
+-                move-result v0
+-                invoke-static {v0}, Lapp/revanced/bilibili/patches/PlaybackSpeedPatch;->onPlaybackSpeedSelected(F)V
++        // 9.12.0: the speed is the last (String) parameter of a static lambda, not a field of it.
++        // Hook right after `Float.parseFloat`, which also skips the "speed locked" toast-only branch.
++        PlayerSettingCreateSpeedFingerprint.result?.mutableMethod?.run {
++            val instructions = implementation!!.instructions
++            val parseIndex = instructions.indexOfFirst {
++                it.opcode == Opcode.INVOKE_STATIC && it.getReference<MethodReference>().toString() ==
++                        "Ljava/lang/Float;->parseFloat(Ljava/lang/String;)F"
++            }
++            val moveResult = instructions.getOrNull(parseIndex + 1)
++            if (parseIndex == -1 || moveResult?.opcode != Opcode.MOVE_RESULT)
++                throw PlayerSettingCreateSpeedFingerprint.exception
++            addInstructions(
++                parseIndex + 2, """
++                invoke-static {v${(moveResult as OneRegisterInstruction).registerA}}, Lapp/revanced/bilibili/patches/PlaybackSpeedPatch;->onPlaybackSpeedSelected(F)V
              """.trimIndent()
              )
          } ?: run {
@@ -1954,7 +3573,7 @@ index 57f3c15..fb86a3d 100644
                  throw PlayerSettingCreateSpeedFingerprint.exception
          }
          MenuServiceCreateSpeedFingerprint.result?.run {
-@@ -71,9 +72,25 @@ object RememberPlaybackSpeedPatch : MultiMethodBytecodePatch(
+@@ -71,20 +79,44 @@ object RememberPlaybackSpeedPatch : MultiMethodBytecodePatch(
              """.trimIndent()
              )
          } ?: run {
@@ -1981,8 +3600,29 @@ index 57f3c15..fb86a3d 100644
          PlaybackSpeedSettingFingerprint.result.ifEmpty {
              throw PlaybackSpeedSettingFingerprint.exception
          }.forEach { r ->
+             val instructions = r.mutableMethod.implementation!!.instructions
+-            val (index, register) = instructions.withIndex().firstNotNullOf { (index, inst) ->
++            // 9.12.0 inlined the old `private float speedOf(int)` helper into a `float[]` lookup,
++            // so fall back to the `IPlayerCoreService.setPlaySpeed(F)V` call that applies the choice.
++            val (index, register) = instructions.withIndex().firstNotNullOfOrNull { (index, inst) ->
+                 if (inst.opcode == Opcode.INVOKE_DIRECT && inst.getReference<MethodReference>().let {
+                         it.returnType == "F" && it.parameterTypes == listOf("I")
+                     }) {
+                     index + 2 to (instructions[index + 1] as OneRegisterInstruction).registerA
+                 } else null
+-            }
++            } ?: instructions.withIndex().firstNotNullOfOrNull { (index, inst) ->
++                if (inst.opcode == Opcode.INVOKE_INTERFACE && inst.getReference<MethodReference>().let {
++                        it.name == "setPlaySpeed" && it.parameterTypes == listOf("F")
++                    }) {
++                    index to (inst as FiveRegisterInstruction).registerD
++                } else null
++            } ?: throw PlaybackSpeedSettingFingerprint.exception
+             r.mutableMethod.addInstructions(
+                 index, """
+                 invoke-static {v$register}, Lapp/revanced/bilibili/patches/PlaybackSpeedPatch;->onPlaybackSpeedSelected(F)V
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/quality/fingerprints/PlayerSettingHelperFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/quality/fingerprints/PlayerSettingHelperFingerprint.kt
-index 364d03e..37c28be 100644
+index 364d03e6..37c28bec 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/quality/fingerprints/PlayerSettingHelperFingerprint.kt
 +++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/quality/fingerprints/PlayerSettingHelperFingerprint.kt
 @@ -6,3 +6,13 @@ object PlayerSettingHelperFingerprint : MethodFingerprint(
@@ -2000,7 +3640,7 @@ index 364d03e..37c28be 100644
 +    strings = listOf("PlayerSettingHelper", "quality settings:")
 +)
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/quality/patch/VideoQualityPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/quality/patch/VideoQualityPatch.kt
-index a8976ef..1d2f863 100644
+index a8976efe..1d2f8634 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/quality/patch/VideoQualityPatch.kt
 +++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/quality/patch/VideoQualityPatch.kt
 @@ -4,12 +4,14 @@ import app.revanced.patcher.data.BytecodeContext
@@ -2070,8 +3710,25 @@ index a8976ef..1d2f863 100644
                          move-result v0
                          return v0
                      """.trimIndent()
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/subtitle/fingerprints/FunctionWidgetServiceFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/subtitle/fingerprints/FunctionWidgetServiceFingerprint.kt
+index 53f3eda6..c08f80a4 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/subtitle/fingerprints/FunctionWidgetServiceFingerprint.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/subtitle/fingerprints/FunctionWidgetServiceFingerprint.kt
+@@ -4,6 +4,10 @@ import app.revanced.patcher.fingerprint.MethodFingerprint
+ 
+ object FunctionWidgetServiceFingerprint : MethodFingerprint(
+     strings = listOf("illegal function type"),
+-    parameters = listOf("I"),
+-    returnType = "I"
++    // 9.12.0: 原来承载该字符串的 (I)I 小方法被内联进了 showWidget 的实现里,
++    // 签名不再是 (I)I。补丁只用到 result.classDef, 所以改为
++    // 「字符串 + 类实现 AbsFunctionWidgetService」定位, 仍然唯一命中 Lgs1/h;。
++    customFingerprint = { _, classDef ->
++        classDef.interfaces.firstOrNull() == "Ltv/danmaku/biliplayerv2/service/AbsFunctionWidgetService;"
++    }
+ )
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/subtitle/patch/SubtitleImportSavePatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/subtitle/patch/SubtitleImportSavePatch.kt
-index 8457919..aea022f 100644
+index 8457919e..aea022f1 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/video/subtitle/patch/SubtitleImportSavePatch.kt
 +++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/video/subtitle/patch/SubtitleImportSavePatch.kt
 @@ -117,8 +117,13 @@ object SubtitleImportSavePatch : MultiMethodBytecodePatch(
@@ -2091,7 +3748,7 @@ index 8457919..aea022f 100644
              "Lapp/revanced/bilibili/patches/SubtitleImportSavePatch\$HookInfo;"
          )!!.mutableClass
 diff --git a/patches/src/main/resources/bilibili/host/values/ids.xml b/patches/src/main/resources/bilibili/host/values/ids.xml
-index 666cb8d..7060f5e 100644
+index 666cb8d5..7060f5e6 100644
 --- a/patches/src/main/resources/bilibili/host/values/ids.xml
 +++ b/patches/src/main/resources/bilibili/host/values/ids.xml
 @@ -1,4 +1,5 @@
@@ -2101,7 +3758,7 @@ index 666cb8d..7060f5e 100644
 +    <item name="biliroaming_video_tools_attached" type="id" />
  </resources>
 diff --git a/patches/src/main/resources/bilibili/host/values/strings.xml b/patches/src/main/resources/bilibili/host/values/strings.xml
-index e6d2505..36fd8d1 100644
+index e6d2505e..36fd8d1b 100644
 --- a/patches/src/main/resources/bilibili/host/values/strings.xml
 +++ b/patches/src/main/resources/bilibili/host/values/strings.xml
 @@ -495,4 +495,84 @@
@@ -2190,7 +3847,7 @@ index e6d2505..36fd8d1 100644
 +    <string name="biliroaming_remove_ads_mine_category">我的页</string>
  </resources>
 diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_dynamic.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_dynamic.xml
-index ed951cd..a7d420e 100644
+index ed951cd6..a7d420e1 100644
 --- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_dynamic.xml
 +++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_dynamic.xml
 @@ -36,20 +36,31 @@
@@ -2234,7 +3891,7 @@ index ed951cd..a7d420e 100644
              android:fragment="app.revanced.bilibili.settings.fragments.FilterDynamicByTypeFragment"
              android:key="filter_dynamic_by_type"
 diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_home.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_home.xml
-index f1fcb77..8038ef9 100644
+index f1fcb77c..8038ef9d 100644
 --- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_home.xml
 +++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_home.xml
 @@ -45,9 +45,6 @@
@@ -2248,7 +3905,7 @@ index f1fcb77..8038ef9 100644
              android:key="drawer"
              android:summary="@string/biliroaming_drawer_summary"
 diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_live_room.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_live_room.xml
-index c37c0fb..217520b 100644
+index c37c0fba..217520bb 100644
 --- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_live_room.xml
 +++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_live_room.xml
 @@ -31,6 +31,10 @@
@@ -2263,7 +3920,7 @@ index c37c0fb..217520b 100644
              android:key="remove_live_watermark"
              android:summary="@string/biliroaming_remove_live_watermark_summary"
 diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_mine.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_mine.xml
-index ce7dfd6..8fe0503 100644
+index ce7dfd65..8fe0503d 100644
 --- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_mine.xml
 +++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_mine.xml
 @@ -15,12 +15,6 @@
@@ -2280,7 +3937,7 @@ index ce7dfd6..8fe0503 100644
              android:fragment="app.revanced.bilibili.settings.fragments.CustomizeDrawerFragment"
              android:key="customize_drawer"
 diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_search.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_search.xml
-index a962281..5f6e23b 100644
+index a962281c..5f6e23b8 100644
 --- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_search.xml
 +++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_search.xml
 @@ -15,7 +15,7 @@
@@ -2308,7 +3965,7 @@ index a962281..5f6e23b 100644
      </androidx.preference.PreferenceCategory>
  </androidx.preference.PreferenceScreen>
 diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_space.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_space.xml
-index b1c55f6..2a799bc 100644
+index b1c55f68..2a799bc0 100644
 --- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_space.xml
 +++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_space.xml
 @@ -9,4 +9,13 @@
@@ -2326,7 +3983,7 @@ index b1c55f6..2a799bc 100644
 +    </androidx.preference.PreferenceCategory>
  </androidx.preference.PreferenceScreen>
 diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_video_detail.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_video_detail.xml
-index cef2fec..c256aec 100644
+index cef2fec5..c256aec8 100644
 --- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_video_detail.xml
 +++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_customize_video_detail.xml
 @@ -38,10 +38,6 @@
@@ -2427,7 +4084,7 @@ index cef2fec..c256aec 100644
      <androidx.preference.PreferenceCategory
          android:key="category_video_detail_other"
 diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_filter_comment.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_filter_comment.xml
-index 7ee9668..7af0ac5 100644
+index 7ee9668b..7af0ac5b 100644
 --- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_filter_comment.xml
 +++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_filter_comment.xml
 @@ -5,9 +5,6 @@
@@ -2441,7 +4098,7 @@ index 7ee9668..7af0ac5 100644
              android:fragment="app.revanced.bilibili.settings.fragments.FilterCommentByKeywordFragment"
              android:key="filter_comment_by_keyword"
 diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_misc.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_misc.xml
-index 75de12a..f700a91 100644
+index 75de12af..f700a919 100644
 --- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_misc.xml
 +++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_misc.xml
 @@ -110,6 +110,34 @@
@@ -2494,7 +4151,7 @@ index 75de12a..f700a91 100644
          android:key="category_always_enabled"
          android:layout="@layout/bili_app_layout_preference_category_title"
 diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_tool.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_tool.xml
-index 166686c..48bbaeb 100644
+index 166686c9..48bbaeb0 100644
 --- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_tool.xml
 +++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_tool.xml
 @@ -13,5 +13,9 @@
@@ -2508,7 +4165,7 @@ index 166686c..48bbaeb 100644
      </androidx.preference.PreferenceCategory>
  </androidx.preference.PreferenceScreen>
 diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_setting_video_detail_filter.xml b/patches/src/main/resources/bilibili/xml/biliroaming_setting_video_detail_filter.xml
-index c58204b..4e1dedf 100644
+index c58204b2..4e1dedf5 100644
 --- a/patches/src/main/resources/bilibili/xml/biliroaming_setting_video_detail_filter.xml
 +++ b/patches/src/main/resources/bilibili/xml/biliroaming_setting_video_detail_filter.xml
 @@ -4,7 +4,7 @@
@@ -2521,7 +4178,7 @@ index c58204b..4e1dedf 100644
              android:summary="@string/biliroaming_rm_video_relate_nothing_summary"
              android:title="@string/biliroaming_rm_video_relate_nothing_title" />
 diff --git a/patches/src/main/resources/bilibili/xml/biliroaming_settings.xml b/patches/src/main/resources/bilibili/xml/biliroaming_settings.xml
-index eaf34b1..258a0cc 100644
+index eaf34b1e..258a0ccf 100644
 --- a/patches/src/main/resources/bilibili/xml/biliroaming_settings.xml
 +++ b/patches/src/main/resources/bilibili/xml/biliroaming_settings.xml
 @@ -8,6 +8,14 @@
@@ -2540,7 +4197,7 @@ index eaf34b1..258a0cc 100644
          <androidx.preference.Preference
              android:fragment="app.revanced.bilibili.settings.fragments.CustomizePlayerFragment"
 diff --git a/settings.gradle.kts b/settings.gradle.kts
-index 5b9fdb6..fd9ab9b 100644
+index 5b9fdb60..fd9ab9bb 100644
 --- a/settings.gradle.kts
 +++ b/settings.gradle.kts
 @@ -21,6 +21,13 @@ dependencyResolutionManagement {

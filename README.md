@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/B%E7%AB%99-8.92.1-00A1D6?style=for-the-badge&logo=bilibili&logoColor=white" alt="Bilibili 8.92.1" />
+<img src="https://img.shields.io/badge/B%E7%AB%99-9.12.0-00A1D6?style=for-the-badge&logo=bilibili&logoColor=white" alt="Bilibili 9.12.0" />
 
 # Bilibili Clean
 
@@ -68,7 +68,7 @@ _我只是想安安静静看个视频._
 - JDK 21
 - Android SDK（带 NDK 和 cmake）
 - 能读 BiliRoamingX GitHub Packages 的令牌
-- 官方 B 站 8.92.1 APK（自己找，这里不放）
+- 官方 B 站 9.12.0 APK（自己找，这里不放）
 
 #### 步骤
 
@@ -88,6 +88,7 @@ GITHUB_ACTOR=你的用户名 GITHUB_TOKEN=你的令牌 ../build-and-patch.sh
 | `new-files/` | 新加的文件，目录结构跟上游一致，整个覆盖过去 |
 | `build-and-patch.sh` | 编译 → 打补丁 → 签名一条龙 |
 | `VERIFY_REPORT.md` | 真机验证结论 |
+| `CHANGELOG.md` | 更新日志 |
 
 > keystore 不在仓库里，别翻了。
 
