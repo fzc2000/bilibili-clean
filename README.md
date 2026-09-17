@@ -99,7 +99,7 @@ GITHUB_ACTOR=你的用户名 GITHUB_TOKEN=你的令牌 ../build-and-patch.sh
 - 批量删除动态的「删」没真跑过——我号上没什么可删的
 - 两个测试项因账号未关注相关 UP 主，只验到入口，详见报告
 
-## 联系我们
+## call me
 
 - [Telegram](t.me/chenmo114514) 
 
