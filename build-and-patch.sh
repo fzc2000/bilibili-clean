@@ -42,6 +42,15 @@ rm -rf $TMP
 echo "succeeded=$(grep -c ' succeeded' $LOGS/patch.log) failed=$(grep -c '^SEVERE: .* failed:' $LOGS/patch.log)"
 grep '^SEVERE: .* failed:' -A2 $LOGS/patch.log | grep -v '^\s*at ' || true
 
+# smali 汇编错误（如「Invalid register: v17」）只会打一行日志，出错的那条指令被悄悄丢掉，
+# 补丁照样报 succeeded，产物装上去才在 ART 校验时 VerifyError。这里一律当构建失败处理。
+if grep -qE '^\[[0-9]+,[0-9]+\] ' $LOGS/patch.log; then
+  echo "!! smali 汇编错误，注入的指令被丢弃，产物不可用："
+  grep -E -B1 '^\[[0-9]+,[0-9]+\] ' $LOGS/patch.log
+  mv -f $OUT_APK "$OUT_APK.broken" 2>/dev/null || true
+  exit 1
+fi
+
 if [[ "${1:-}" == "--install" ]]; then
   echo "==> adb install"
   $ANDROID_HOME/platform-tools/adb install -r $OUT_APK | tail -1

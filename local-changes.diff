@@ -1713,7 +1713,7 @@ index 18835b53..c324946c 100644
      }
  }
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/drawer/patch/DrawerPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/drawer/patch/DrawerPatch.kt
-index a06ea140..01801e35 100644
+index a06ea140..efcef0e4 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/drawer/patch/DrawerPatch.kt
 +++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/drawer/patch/DrawerPatch.kt
 @@ -64,12 +64,14 @@ object DrawerPatch : BytecodePatch(
@@ -1737,6 +1737,18 @@ index a06ea140..01801e35 100644
          layoutParamsExClass.mutableClass.setSuperClass(gravityField.definingClass)
          layoutParamsExClass.mutableClass.methods.run {
              first { it.name == "<init>" }.replaceInstruction(
+@@ -97,9 +99,9 @@ object DrawerPatch : BytecodePatch(
+                 val insertIdx = implementation!!.instructions.size - 1
+                 addInstructions(
+                     insertIdx, """
+-                    invoke-virtual {p0}, Landroidx/fragment/app/Fragment;->getView()Landroid/view/View;
++                    invoke-virtual/range {p0 .. p0}, Landroidx/fragment/app/Fragment;->getView()Landroid/view/View;
+                     move-result-object p1
+-                    invoke-static {p1}, Lapp/revanced/bilibili/patches/drawer/DrawerPatch;->onMainFrameFragmentViewCreated(Landroid/view/View;)V
++                    invoke-static/range {p1 .. p1}, Lapp/revanced/bilibili/patches/drawer/DrawerPatch;->onMainFrameFragmentViewCreated(Landroid/view/View;)V
+                 """.trimIndent()
+                 )
+             } ?: throw PatchException("can not found BaseMainFrameFragment")
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/integrations/fingerprints/BaseMainFrameFragmentFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/integrations/fingerprints/BaseMainFrameFragmentFingerprint.kt
 index 5911f89d..a85f5564 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/integrations/fingerprints/BaseMainFrameFragmentFingerprint.kt
@@ -1750,11 +1762,24 @@ index 5911f89d..a85f5564 100644
 +    parameters = listOf("Lbolts/Task;"),
 +    returnType = "Ljava/lang/Object;"
  )
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/integrations/patch/MainActivityPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/integrations/patch/MainActivityPatch.kt
+index 2ed6ea0d..4f6061a6 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/integrations/patch/MainActivityPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/integrations/patch/MainActivityPatch.kt
+@@ -39,7 +39,7 @@ object MainActivityPatch : BytecodePatch() {
+             }
+             methods.find { it.name == "onBackPressed" }?.addInstructionsWithLabels(
+                 0, """
+-                    invoke-static {p0}, Lapp/revanced/bilibili/patches/main/MainActivityDelegate;->onBackPressed(Ltv/danmaku/bili/MainActivityV2;)Z
++                    invoke-static/range {p0 .. p0}, Lapp/revanced/bilibili/patches/main/MainActivityDelegate;->onBackPressed(Ltv/danmaku/bili/MainActivityV2;)Z
+                     move-result v0
+                     if-eqz v0, :jump
+                     return-void
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/json/patch/PegasusPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/json/patch/PegasusPatch.kt
-index 2f856019..7f9876fc 100644
+index 2f856019..7925a5c5 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/json/patch/PegasusPatch.kt
 +++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/json/patch/PegasusPatch.kt
-@@ -53,28 +53,31 @@ object PegasusPatch : BytecodePatch(
+@@ -53,32 +53,35 @@ object PegasusPatch : BytecodePatch(
                  mutableClass.methods.add(it)
              }
          } ?: throw PegasusParserFingerprint.exception
@@ -1804,6 +1829,11 @@ index 2f856019..7f9876fc 100644
          }
          fun MutableMethod.hookOnFeedClick() = addInstructionsWithLabels(
              0, """
+-            invoke-static {p3}, Lapp/revanced/bilibili/patches/json/PegasusPatch;->onFeedClick(Lcom/bilibili/app/comm/list/common/data/DislikeReason;)Z
++            invoke-static/range {p3 .. p3}, Lapp/revanced/bilibili/patches/json/PegasusPatch;->onFeedClick(Lcom/bilibili/app/comm/list/common/data/DislikeReason;)Z
+             move-result v0
+             if-eqz v0, :jump
+             return-void
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/notification/fingerprints/NotificationStyleAbFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/notification/fingerprints/NotificationStyleAbFingerprint.kt
 index 85e7765c..f1fab392 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/notification/fingerprints/NotificationStyleAbFingerprint.kt
@@ -2824,6 +2854,96 @@ index 50e5fd3e..e951f07d 100644
                  }
                  val moveExceptionIndex = implementation.instructions.indexOfLast {
                      it.opcode == Opcode.MOVE_EXCEPTION
+diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/protobuf/patch/UnlockProtobufPatch.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/protobuf/patch/UnlockProtobufPatch.kt
+index a54d1f30..c8fd1ae1 100644
+--- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/protobuf/patch/UnlockProtobufPatch.kt
++++ b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/protobuf/patch/UnlockProtobufPatch.kt
+@@ -1,7 +1,6 @@
+ package app.revanced.patches.bilibili.misc.protobuf.patch
+ 
+ import app.revanced.patcher.data.BytecodeContext
+-import app.revanced.patcher.extensions.InstructionExtensions.replaceInstruction
+ import app.revanced.patcher.patch.BytecodePatch
+ import app.revanced.patcher.patch.annotation.CompatiblePackage
+ import app.revanced.patcher.patch.annotation.Patch
+@@ -9,6 +8,9 @@ import app.revanced.patcher.util.proxy.mutableTypes.MutableMethod
+ import app.revanced.patches.bilibili.utils.*
+ import com.android.tools.smali.dexlib2.Opcode
+ import com.android.tools.smali.dexlib2.builder.instruction.BuilderInstruction35c
++import com.android.tools.smali.dexlib2.builder.instruction.BuilderInstruction3rc
++import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
++import com.android.tools.smali.dexlib2.iface.reference.MethodReference
+ 
+ @Patch(
+     name = "Unlock ProtoBuf",
+@@ -22,23 +24,52 @@ import com.android.tools.smali.dexlib2.builder.instruction.BuilderInstruction35c
+ object UnlockProtobufPatch : BytecodePatch() {
+     override fun execute(context: BytecodeContext) {
+         val methodNameRegex = Regex("""^((set|add|remove|clear|merge|getMutable)\w+)|<init>$""")
++        fun MethodReference.key() = "$definingClass->$name(${parameterTypes.joinToString("")})$returnType"
+         context.classes.filter { it.superclass == "Lcom/google/protobuf/GeneratedMessageLite;" }
+-            .flatMap { it.proxy(context).methods }.forEach { m ->
++            .map { it.proxy(context) }.forEach { c ->
+                 // step 1, private to public
+-                if (m.accessFlags.isPrivate()
+-                    && !m.accessFlags.isStatic()
+-                    && m.name.matches(methodNameRegex)
+-                ) m.accessFlags = m.accessFlags.toPublic()
+-                else if (m.accessFlags.isSynthetic() && m.returnType.let { it == "V" || it == "Ljava/util/Map;" }) {
+-                    val inst = m.implementation!!.instructions[0]
+-                    // step 2, invoke-direct to invoke-virtual
+-                    if (inst.opcode == Opcode.INVOKE_DIRECT) {
+-                        val args = (inst as BuilderInstruction35c).args()
+-                        m.replaceInstruction(
+-                            0, """
+-                                invoke-virtual {$args}, ${inst.reference}
+-                            """.trimIndent()
+-                        )
++                // 构造器改成 public 仍然是 direct 方法，调用方式不变；其余方法会从 direct 变成 virtual
++                val nowVirtual = mutableSetOf<String>()
++                c.methods.forEach { m ->
++                    if (m.accessFlags.isPrivate()
++                        && !m.accessFlags.isStatic()
++                        && m.name.matches(methodNameRegex)
++                    ) {
++                        m.accessFlags = m.accessFlags.toPublic()
++                        if (m.name != "<init>") nowVirtual += m.key()
++                    }
++                }
++                if (nowVirtual.isEmpty()) return@forEach
++                // step 2, 本类里所有指向这些方法的 invoke-direct 都要改成 invoke-virtual，否则运行时
++                // IncompatibleClassChangeError。上游只改「合成方法的第 0 条」，但 9.12.0 的 R8 会把常量实参
++                // 内联进访问器（const/4 v0, 0x1 + invoke-direct {p0, v0}, ...->setShared(Z)V），
++                // invoke-direct 不再是第 0 条，所以改成扫全部方法、全部位置，并覆盖 /range 形式
++                c.methods.forEach { m ->
++                    val implementation = m.implementation ?: return@forEach
++                    implementation.instructions.toList().forEachIndexed { index, inst ->
++                        val reference = (inst as? ReferenceInstruction)?.reference as? MethodReference
++                            ?: return@forEachIndexed
++                        if (reference.key() !in nowVirtual) return@forEachIndexed
++                        when (inst.opcode) {
++                            Opcode.INVOKE_DIRECT -> (inst as BuilderInstruction35c).run {
++                                implementation.replaceInstruction(
++                                    index, BuilderInstruction35c(
++                                        Opcode.INVOKE_VIRTUAL, registerCount,
++                                        registerC, registerD, registerE, registerF, registerG, this.reference
++                                    )
++                                )
++                            }
++
++                            Opcode.INVOKE_DIRECT_RANGE -> (inst as BuilderInstruction3rc).run {
++                                implementation.replaceInstruction(
++                                    index, BuilderInstruction3rc(
++                                        Opcode.INVOKE_VIRTUAL_RANGE, startRegister, registerCount, this.reference
++                                    )
++                                )
++                            }
++
++                            else -> {}
++                        }
+                     }
+                 }
+             }
 diff --git a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/settings/fingerprints/PreferenceManagerFingerprint.kt b/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/settings/fingerprints/PreferenceManagerFingerprint.kt
 index 6b858275..276a7c90 100644
 --- a/patches/src/main/kotlin/app/revanced/patches/bilibili/misc/settings/fingerprints/PreferenceManagerFingerprint.kt
