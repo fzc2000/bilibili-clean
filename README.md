@@ -2,17 +2,17 @@
 
 <img src="https://img.shields.io/badge/B%E7%AB%99-9.12.0-00A1D6?style=for-the-badge&logo=bilibili&logoColor=white" alt="Bilibili 9.12.0" />
 
-# Bilibili Clean
+# Bilibili Clean 
 
 [![Release](https://img.shields.io/github/v/release/fzc2000/bilibili-clean?style=flat-square&label=最新版本&color=brightgreen)](https://github.com/fzc2000/bilibili-clean/releases)
 [![Upstream](https://img.shields.io/badge/上游-BiliRoamingX%4058aaf27-blue?style=flat-square)](https://github.com/BiliRoamingX/BiliRoamingX/tree/58aaf27)
 [![License](https://img.shields.io/badge/License-GPL--3.0-orange?style=flat-square)](./LICENSE)
 
-> ✨  一个由  BiliRoamingX 二次开发的Bilibili官方客户端，含去广告解锁地区限制等功能
+> ✨  一个由  BiliRoamingX 二次开发的Bilibili官方客户端，含去广告解锁地区限制等功能的客户端
 > 
 📝 **[下载发布版本](https://github.com/fzc2000/bilibili-clean/releases)** | 🧩 **[BiliRoamingX](https://github.com/BiliRoamingX/BiliRoamingX)**
 
-_我只是想安安静静看个视频._
+_._
 
 </div>
 
@@ -20,7 +20,7 @@ _我只是想安安静静看个视频._
 
 ## 为什么做这个
 
-因为我受不了开屏广告，而且普通用户安装BiliRoamingX并不简单。且我想用官方客户端
+因为我受不了开屏广告，而且普通用户安装BiliRoamingX并不简单。
 
 ## 特性
 
@@ -94,11 +94,7 @@ GITHUB_ACTOR=你的用户名 GITHUB_TOKEN=你的令牌 ../build-and-patch.sh
 
 </details>
 
-## 已知问题
 
-- 记忆合集进度只认「整个合集的第 1 集」，分季合集从某一季的第 1 集进不会跳转
-- 批量删除动态的「删」没真跑过——我号上没什么可删的
-- 两个测试项因账号未关注相关 UP 主，只验到入口，详见报告
 
 ## call me
 
