@@ -1,3 +1,71 @@
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/account/Accounts.kt b/integrations/app/src/main/java/app/revanced/bilibili/account/Accounts.kt
+index c4e17ea8..ca68a11d 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/account/Accounts.kt
++++ b/integrations/app/src/main/java/app/revanced/bilibili/account/Accounts.kt
+@@ -14,6 +14,7 @@ import app.revanced.bilibili.settings.Settings
+ import app.revanced.bilibili.utils.*
+ import java.io.File
+ import java.io.RandomAccessFile
++import java.util.Date
+ import java.nio.channels.FileChannel
+ import java.util.concurrent.TimeUnit
+ 
+@@ -110,6 +111,55 @@ object Accounts {
+             } else null
+         }.onFailure {
+             Logger.error(it) { "Accounts, failed to read account" }
++        }.getOrNull() ?: readAccountFromApp()
++    }
++
++    @JvmStatic
++    @Volatile
++    private var appFallbackLogged = false
++
++    /**
++     * 9.12.0 起账号层多了一套 KMM 存储（bili_accounts_kntr_store），用不用由 AB 实验
++     * （IAccountKmmExp）决定，命中时上面两份旧存储可能读不到，登录态相关功能会静默失效。
++     * 这时退而向应用自己的 BiliAccounts 要：它的 AccessToken / CookieInfo 字段名带 keep 规则，
++     * 8.92.1 与 9.12.0 完全一致。应用账号模块还没初始化时会抛异常，返回 null 下次再试。
++     */
++    @JvmStatic
++    private fun readAccountFromApp(): Account? {
++        return runCatching {
++            val biliAccounts = Class.forName("com.bilibili.lib.accounts.BiliAccounts")
++                .getMethod("get", Context::class.java).invoke(null, Utils.getContext())
++                ?: return null
++            val t = biliAccounts.javaClass.getMethod("getAccessToken").invoke(biliAccounts)
++                ?: return null
++            fun Any.field(name: String): Any? = javaClass.getField(name).get(this)
++            val token = AccessToken(
++                accessKey = t.field("mAccessKey") as? String ?: "",
++                expires = Date((t.field("mExpires") as? Long ?: 0L) * 1000),
++                expiresIn = t.field("mExpiresIn") as? Long ?: 0L,
++                fastLoginToken = t.field("mFastLoginToken") as? String ?: "",
++                mid = t.field("mMid") as? Long ?: 0L,
++                refreshToken = t.field("mRefreshToken") as? String ?: "",
++            )
++            if (!token.isValid) return null
++            val c = biliAccounts.javaClass.getMethod("getAccountCookie").invoke(biliAccounts)
++            val cookies = (c?.field("cookies") as? List<*>).orEmpty().filterNotNull().map {
++                CookieInfo.CookieBean(
++                    expires = Date((it.field("expires") as? Long ?: 0L) * 1000),
++                    httpOnly = (it.field("httpOnly") as? Int ?: 0) != 0,
++                    name = it.field("name") as? String ?: "",
++                    secure = (it.field("secure") as? Int ?: 0) != 0,
++                    value = it.field("value") as? String ?: "",
++                )
++            }
++            val domains = (c?.field("domains") as? Array<*>).orEmpty().filterIsInstance<String>()
++            if (!appFallbackLogged) {
++                appFallbackLogged = true
++                Logger.info { "Accounts, legacy account storage unreadable, read from BiliAccounts instead" }
++            }
++            Account(token, CookieInfo(cookies, domains))
++        }.onFailure {
++            Logger.debug { "Accounts, failed to read account from BiliAccounts: $it" }
+         }.getOrNull()
+     }
+ 
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/AutoLikePatch.java b/integrations/app/src/main/java/app/revanced/bilibili/patches/AutoLikePatch.java
 index 53703099..3fbd356c 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/AutoLikePatch.java
@@ -267,6 +335,59 @@ index 335af3c2..21e5c000 100644
      object HookInfo {
          @Keep
          @JvmStatic
+diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/json/JSONPatch.java b/integrations/app/src/main/java/app/revanced/bilibili/patches/json/JSONPatch.java
+index 7823f06b..5efc6d5f 100644
+--- a/integrations/app/src/main/java/app/revanced/bilibili/patches/json/JSONPatch.java
++++ b/integrations/app/src/main/java/app/revanced/bilibili/patches/json/JSONPatch.java
+@@ -71,6 +71,14 @@ public class JSONPatch {
+         return name;
+     });
+ 
++    // 9.12.0 起开屏广告模型挪了包、改了名（现为 tv.danmaku.bili.splash.ad.model.SplashListResponse，
++    // 已由 okhttp/hooks/Splash 在 HTTP 层处理）。旧类不存在时直接 instanceof 会抛 NoClassDefFoundError，
++    // 而它排在下面这串 else-if 的最前面，一抛整串全废。所以先按名字探测，类不在就跳过这两个分支。
++    private static final Class<?> splashDataClass =
++            Reflex.findClassIfExists("tv.danmaku.bili.ui.splash.ad.model.SplashData", null);
++    private static final Class<?> splashShowDataClass =
++            Reflex.findClassIfExists("tv.danmaku.bili.ui.splash.ad.model.SplashShowData", null);
++
+     @Keep
+     public static Object parseObjectHook(Object obj) {
+         try {
+@@ -83,7 +91,8 @@ public class JSONPatch {
+ 
+     private static Object parseObjectHookInternal(Object obj) {
+         Object data = (obj instanceof GeneralResponse<?> resp) ? resp.data : obj;
+-        if (data instanceof SplashData splashData) {
++        if (splashDataClass != null && splashDataClass.isInstance(data)) {
++            SplashData splashData = (SplashData) data;
+             if (Settings.PurifySplash.get()) try {
+                 splashData.splashList.clear();
+                 splashData.strategyList.clear();
+@@ -91,7 +100,8 @@ public class JSONPatch {
+                 splashData.getSplashList().clear();
+                 splashData.getStrategyList().clear();
+             }
+-        } else if (data instanceof SplashShowData showData) {
++        } else if (splashShowDataClass != null && splashShowDataClass.isInstance(data)) {
++            SplashShowData showData = (SplashShowData) data;
+             if (Settings.PurifySplash.get()) try {
+                 showData.strategyList.clear();
+             } catch (Throwable ignored) {
+@@ -161,10 +171,12 @@ public class JSONPatch {
+                 info.showReserveDetail = false;
+         } else if (data instanceof BiliLiveRoomUserInfo info) {
+             Set<? extends String> keys = Settings.PurifyLivePopups.get();
+-            if (keys.contains("gift")) {
++            // 9.12.0 起 BiliLiveRoomUserInfo 已经没有 functionCard（送礼提醒卡被官方撤掉），访问会 NoSuchFieldError
++            if (keys.contains("gift")) try {
+                 FunctionCard card = info.functionCard;
+                 if (card != null)
+                     card.sengGiftCard = null;
++            } catch (Throwable ignored) {
+             }
+             if (keys.contains("task"))
+                 info.taskInfo = null;
 diff --git a/integrations/app/src/main/java/app/revanced/bilibili/patches/main/ApplicationDelegate.java b/integrations/app/src/main/java/app/revanced/bilibili/patches/main/ApplicationDelegate.java
 index 49d02aa0..a68c6d64 100644
 --- a/integrations/app/src/main/java/app/revanced/bilibili/patches/main/ApplicationDelegate.java
